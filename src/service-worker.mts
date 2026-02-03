@@ -33,7 +33,7 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
 
       fetch(indexUrl)
         .then((response: Response) => {
-          console.log(`[perplexity] index ok?: ${rfesponse.ok}`)
+          console.log(`[perplexity] index ok?: ${response.ok}`)
 
           if (response.ok) {
             let toCrawl = []
