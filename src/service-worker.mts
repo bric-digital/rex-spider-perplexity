@@ -33,10 +33,15 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
 
       fetch(indexUrl)
         .then((response: Response) => {
+          console.log(`[perplexity] index ok?: ${rfesponse.ok}`)
+
           if (response.ok) {
             let toCrawl = []
 
             response.json().then((perplexityList) => {
+              console.log(`[perplexity] perplexityList`)
+              console.log(perplexityList)
+
               for (const convo of perplexityList) {
                 if (convo.link !== undefined) {
                   const tokens = convo.link.split('/')
