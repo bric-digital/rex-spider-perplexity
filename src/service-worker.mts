@@ -214,6 +214,9 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
                                 conversation.turns.push(turn)
 
                                 for (const block of entry.blocks) {
+                                  console.log(`block`)
+                                  console.log(block)
+
                                   if (block['intended_usage'] === 'sources_answer_mode') {
                                     let index = 0
 
