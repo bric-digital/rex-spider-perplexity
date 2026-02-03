@@ -244,6 +244,26 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
 
                                       index += 1
                                     }
+                                  } else if (block['intended_usage'] === 'pro_search_steps') {
+                                    for (const searchStep of block['plan_block']['steps']) {
+                                      if (searchStep['step_type'] === 'SEARCH_WEB') {
+                                        for (const searchQuery of searchStep['search_web_content']['queries']) {
+                                          if (search['query*'] !== '') {
+                                            search['query*'] += '; '
+                                          }
+
+                                          search['query*'] += searchQuery['query']
+
+                                          if (search['type'].includes(searchQuery['engine']) === false) {
+                                            if (search['type'] !== '') {
+                                              search['type'] += '; '
+                                            }
+
+                                            search['type'] += searchQuery['engine']
+                                          }
+                                        }
+                                      }
+                                    }
                                   } else if (block['intended_usage'] === 'ask_text') {
                                     let response:Turn = {
                                       speaker: `perplexity:${entry['user_selected_model']}`,
