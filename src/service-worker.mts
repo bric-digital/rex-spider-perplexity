@@ -218,6 +218,9 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
                                     let index = 0
 
                                     for (const webResult in block['sources_mode_block']['web_results']) {
+                                      console.log(`webResult`)
+                                      console.log(webResult)
+
                                       let result:Result = {
                                         title: webResult['name'],
                                         url: webResult['url'],
