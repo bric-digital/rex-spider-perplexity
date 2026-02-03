@@ -69,6 +69,7 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
                       if (response.ok) {
                         response.json().then((result) => {
                           console.log(`[perplexity] ok/json: ${nextUrl}`)
+                          console.log(result)
 
                           if (result.status === 'success') {
                             let firstWhen = new Date(result.entries[0]['entry_updated_datetime'])
