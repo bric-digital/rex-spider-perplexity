@@ -208,7 +208,7 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
               }
 
               fetchConvo()
-            }
+            })
           } else {
             resolve(true) // Error - fall back to DOM scraping...
           }
