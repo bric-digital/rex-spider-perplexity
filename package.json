@@ -47,6 +47,7 @@
         "typescript-eslint": "^8.46.3"
     },
     "dependencies": {
+        "@bric/extension-conversation": "github:bric-digital/extension-conversation",
         "@bric/webmunk-core": "github:bric-digital/webmunk-core",
         "@bric/webmunk-spider": "github:bric-digital/webmunk-spider",
         "jquery": "^3.7.1"
