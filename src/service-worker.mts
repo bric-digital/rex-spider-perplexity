@@ -21,6 +21,8 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
   }
 
   checkNeedsUpdate(): Promise<boolean> {
+    console.log('[perplexity] returning checkNeedsUpdate promise...')
+
     return new Promise<boolean>((resolve) => {
       // Assuming logged in...
 
