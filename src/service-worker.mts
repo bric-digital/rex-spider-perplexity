@@ -253,16 +253,16 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
                                       'metadata*': block
                                     }
 
-                                    if (search['query*'] !== '') {
-                                      response['search'] =  search
-                                    }
-
-                                    if (citations.length > 0) {
-                                      response['citations'] =  citations
-                                    }
-
                                     conversation.turns.push(response)
                                   }
+                                }
+
+                                if (search['query*'] !== '') {
+                                  conversation.turns[conversation.turns.length - 1]['search'] =  search
+                                }
+
+                                if (citations.length > 0) {
+                                  conversation.turns[conversation.turns.length - 1]['citations'] =  citations
                                 }
                               }
                             }
