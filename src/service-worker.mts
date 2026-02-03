@@ -90,7 +90,12 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
                             let entryIndex = 0
 
                             for (let entry of result.entries) { // Each entry is a question and answer pair
-                              const when = new Date(entry.updated_us / 1000)
+                              let when = new Date(entry.entry_updated_datetime)
+
+                              if (entry.updated_us !== undefined) {
+                                when = new Date(entry.updated_us / 1000)
+                              }
+
                               console.log(`when ${when} -- ${entry.updated_us}`)
 
                               const whenString = new DateString(when.toISOString())
