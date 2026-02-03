@@ -64,7 +64,7 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
 
                   console.log(`[perplexity] crawl: ${nextUrl}`)
 
-                  fetch(indexUrl)
+                  fetch(nextUrl)
                     .then((convoResponse: Response) => {
                       if (convoResponse.ok) {
                         convoResponse.json().then((result) => {
