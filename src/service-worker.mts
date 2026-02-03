@@ -220,7 +220,7 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
                                   if (block['intended_usage'] === 'sources_answer_mode') {
                                     let index = 0
 
-                                    for (const webResult in block['sources_mode_block']['web_results']) {
+                                    for (const webResult of block['sources_mode_block']['web_results']) {
                                       console.log(`webResult`)
                                       console.log(webResult)
 
