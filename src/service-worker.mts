@@ -1,6 +1,7 @@
 import { Conversation, Turn, DateString, Citation, Search, Result } from '@bric/extension-conversation/types'
 
-import webmunkSpiderPlugin, { WebmunkSpider, dispatchEvent } from '@bric/webmunk-spider/service-worker'
+import { dispatchEvent } from '@bric/webmunk-core/service-worker'
+import webmunkSpiderPlugin, { WebmunkSpider } from '@bric/webmunk-spider/service-worker'
 
 export class WebmunkPerplexitySpider extends WebmunkSpider {
   fetchUrls(): string[] {
