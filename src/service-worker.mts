@@ -74,6 +74,8 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
                           if (result.status === 'success') {
                             let firstWhen = new Date(result.entries[0]['entry_updated_datetime'])
 
+                            console.log(`parse: ${result.entries[0]['entry_updated_datetime']}`)
+
                             let firstWhenString:DateString = new DateString(result.entries[0]['entry_updated_datetime'])
 
                             let conversation:Conversation = {
