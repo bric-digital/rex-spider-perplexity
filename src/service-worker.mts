@@ -109,10 +109,10 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
 
                               conversation['ended'] = whenString
 
-                              const stepsContent = JSON.parse(entry.text) as []
-
                               let responseMetadata = {}
+
                               let citations:Citation[] = []
+
                               let search:Search = {
                                 platform: 'perplexity',
                                 'query*': '',
@@ -120,82 +120,143 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
                                 results: [],
                               }
 
-                              for (const step of stepsContent) {
-                                if (step['step_type'] === 'INITIAL_QUERY') {
-                                  let turn:Turn = {
-                                    speaker: entry['author_username'],
-                                    when: whenString,
-                                    'content*': step['content']['query'],
-                                    identifier: 'uuid:',
-                                    'metadata*': {
-                                      INITIAL_QUERY: step
-                                    }
-                                  }
+                              if (entry.text !== undefined) {
+                                const stepsContent = JSON.parse(entry.text) as []
 
-                                  conversation.turns.push(turn)
-                                } else if (step['step_type'] === 'SEARCH_WEB') {
-                                  for (let query of step['content']['queries'] as []) {
+                                for (const step of stepsContent) {
+                                  if (step['step_type'] === 'INITIAL_QUERY') {
+                                    let turn:Turn = {
+                                      speaker: entry['author_username'],
+                                      when: whenString,
+                                      'content*': step['content']['query'],
+                                      identifier: 'uuid:',
+                                      'metadata*': {
+                                        INITIAL_QUERY: step
+                                      }
+                                    }
+
+                                    conversation.turns.push(turn)
+                                  } else if (step['step_type'] === 'SEARCH_WEB') {
+                                    for (let query of step['content']['queries'] as []) {
+                                      if (search['query*'] !== '') {
+                                        search['query*'] += '; '
+                                      }
+
+                                      search['query*'] += query['query']
+
+                                      if (search['type'] !== '') {
+                                        search['type'] += '; '
+                                      }
+
+                                      search['type'] += query['engine']
+                                    }
+
+                                    responseMetadata['SEARCH_WEB'] = step
+                                  } else if (step['step_type'] === 'SEARCH_RESULTS') {
+                                    let index = 0
+
+                                    for (let webResult of step['content']['web_results'] as []) {
+                                      let result:Result = {
+                                        title: webResult['name'],
+                                        url: webResult['url'],
+                                        preview: webResult['snippet'],
+                                        index,
+                                        metadata: webResult
+                                      }
+
+                                      search.results.push(result)
+
+                                      let citation:Citation = {
+                                        title: webResult['name'],
+                                        url: webResult['url'],
+                                        source: webResult['meta_data']['citation_domain_name']
+                                      }
+
+                                      citations.push(citation)
+                                    }
+
+                                    responseMetadata['SEARCH_RESULTS'] = step
+
+                                  } else if (step['step_type'] === 'FINAL') {
+                                    responseMetadata['FINAL'] = step
+
+                                    const answer = JSON.parse(step['content']['answer'])
+
+                                    let turn:Turn = {
+                                      speaker: `perplexity:${entry['author_username']}`,
+                                      when: whenString,
+                                      'content*': answer['answer'],
+                                      identifier: 'uuid:',
+                                      'metadata*': responseMetadata,
+                                    }
+
                                     if (search['query*'] !== '') {
-                                      search['query*'] += '; '
+                                      turn['search'] =  search
                                     }
 
-                                    search['query*'] += query['query']
-
-                                    if (search['type'] !== '') {
-                                      search['type'] += '; '
+                                    if (citations.length > 0) {
+                                      turn['citations'] =  citations
                                     }
 
-                                    search['type'] += query['engine']
+                                    conversation.turns.push(turn)
                                   }
+                                }
 
-                                  responseMetadata['SEARCH_WEB'] = step
-                                } else if (step['step_type'] === 'SEARCH_RESULTS') {
-                                  let index = 0
+                              } else if (entry['step_type'] !== undefined) {
+                                let turn:Turn = {
+                                  speaker: entry['author_username'],
+                                  when: whenString,
+                                  'content*': entry['query_str'],
+                                  identifier: `uuid:${entry['uuid']}`,
+                                  'metadata*': entry
+                                }
 
-                                  for (let webResult of step['content']['web_results'] as []) {
-                                    let result:Result = {
-                                      title: webResult['name'],
-                                      url: webResult['url'],
-                                      preview: webResult['snippet'],
-                                      index,
-                                      metadata: webResult
+                                conversation.turns.push(turn)
+
+                                for (const block of entry.blocks) {
+                                  if (block['intended_usage'] === 'sources_answer_mode') {
+                                    let index = 0
+
+                                    for (const webResult in block['sources_mode_block']['web_results']) {
+                                      let result:Result = {
+                                        title: webResult['name'],
+                                        url: webResult['url'],
+                                        preview: webResult['snippet'],
+                                        index,
+                                        metadata: webResult
+                                      }
+
+                                      search.results.push(result)
+
+                                      let citation:Citation = {
+                                        title: webResult['name'],
+                                        url: webResult['url'],
+                                        source: webResult['meta_data']['citation_domain_name']
+                                      }
+
+                                      citations.push(citation)
+
+                                      index += 1
+                                    }
+                                  } else if (block['intended_usage'] === 'ask_text') {
+                                    let response:Turn = {
+                                      speaker: `perplexity:${entry['user_selected_model']}`,
+                                      when: whenString,
+                                      'content*': block['markdown_block']['answer'],
+                                      identifier: `uuid:${entry['uuid']}`,
+                                      'metadata*': block
                                     }
 
-                                    search.results.push(result)
-
-                                    let citation:Citation = {
-                                      title: webResult['name'],
-                                      url: webResult['url'],
-                                      source: webResult['meta_data']['citation_domain_name']
+                                    if (search['query*'] !== '') {
+                                      response['search'] =  search
                                     }
 
-                                    citations.push(citation)
+                                    if (citations.length > 0) {
+                                      response['citations'] =  citations
+                                    }
+
+                                    conversation.turns.push(response)
                                   }
-
-                                  responseMetadata['SEARCH_RESULTS'] = step
-
-                                } else if (step['step_type'] === 'FINAL') {
-                                  responseMetadata['FINAL'] = step
-
-                                  const answer = JSON.parse(step['content']['answer'])
-
-                                  let turn:Turn = {
-                                    speaker: `perplexity:${entry['author_username']}`,
-                                    when: whenString,
-                                    'content*': answer['answer'],
-                                    identifier: 'uuid:',
-                                    'metadata*': responseMetadata,
-                                  }
-
-                                  if (search['query*'] !== '') {
-                                    turn['search'] =  search
-                                  }
-
-                                  if (citations.length > 0) {
-                                    turn['citations'] =  citations
-                                  }
-
-                                  conversation.turns.push(turn)
                                 }
                               }
                             }
