@@ -178,6 +178,8 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
                           payload['name'] = 'rex-conversation'
                           payload['date'] = firstWhen
 
+                          // TODO: add check to see if conversation is actually updated...
+
                           dispatchEvent(payload)
 
                           fetchConvo()
