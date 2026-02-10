@@ -20,6 +20,19 @@ export class REXPerplexitySpider extends REXSpider {
     return ['https://www.perplexity.ai/library/']
   }
 
+  checkLogin(): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      const indexUrl = 'https://www.perplexity.ai/rest/thread/list_recent?version=2.18&source=default'
+
+      console.log(`[perplexity] index: ${indexUrl}`)
+
+      fetch(indexUrl)
+        .then((response: Response) => {
+          resolve(response.ok)
+        })
+    })
+  }
+
   checkNeedsUpdate(): Promise<boolean> {
     console.log('[perplexity] returning checkNeedsUpdate promise...')
 
