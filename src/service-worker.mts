@@ -28,7 +28,17 @@ export class REXPerplexitySpider extends REXSpider {
 
       fetch(indexUrl)
         .then((response: Response) => {
-          resolve(response.ok)
+          if (response.ok) {
+            response.json().then((perplexityList) => {
+              if (perplexityList.length > 0) {
+                resolve(true)
+              } else {
+                resolve(false)
+              }
+            })
+          } else {
+            resolve(false)
+          }
         })
     })
   }
