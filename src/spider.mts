@@ -28,13 +28,6 @@ export class REXPerplexityContentSpider extends REXContentSpider {
   }
 
   fetchResults() {
-    // const response = {
-    //   spiderName: 'ChatGPT',
-    //   results: [],
-    //   urls: [],
-    //   loggedIn: false
-    // }
-
     console.log('[perplexity] fetchResults')
 
     window.setTimeout(() => {
@@ -114,16 +107,7 @@ export class REXPerplexityContentSpider extends REXContentSpider {
 
         return
       }
-
     }, 1000)
-
-    // } else if (window.location.href.toLowerCase().startsWith('https://chatgpt.com/')) {
-    //   // Conversation page
-    // } else if (window.location.href.toLowerCase() === 'https://chatgpt.com/') {
-    //   if ($('div.group/sidebar button div:trimmedTextEquals("Account")').length > 0) {
-    //     response.loggedIn = true
-    //   }
-    // }
   }
 }
 

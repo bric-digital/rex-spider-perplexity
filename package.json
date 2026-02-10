@@ -47,8 +47,8 @@
         "typescript-eslint": "^8.46.3"
     },
     "dependencies": {
-        "@bric/extension-conversation": "github:bric-digital/extension-conversation",
         "@bric/rex-spider": "github:bric-digital/rex-spider",
+        "@bric/rex-types": "github:bric-digital/rex-types",
         "jquery": "^3.7.1"
     }
 }

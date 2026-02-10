@@ -1,4 +1,4 @@
-import { Conversation, Turn, DateString, Citation, Search, Result } from '@bric/extension-conversation/types'
+import { Conversation, Turn, DateString, Citation, Search, Result } from '@bric/rex-types/types'
 
 import { dispatchEvent } from '@bric/rex-core/service-worker'
 import rexSpiderPlugin, { REXSpider } from '@bric/rex-spider/service-worker'
