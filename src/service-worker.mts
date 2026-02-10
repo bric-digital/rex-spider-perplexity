@@ -330,6 +330,9 @@ export class REXPerplexitySpider extends REXSpider {
                             }
 
                             rexCorePlugin.handleMessage(message, this, (response) => {
+                              console.log(`fetchValue`)
+                              console.log(response)
+
                               const timestamp = response[lastUpdateKey]
 
                               console.log(`TS TEST ${timestamp} <? ${latestDate.valueOf()}`)
