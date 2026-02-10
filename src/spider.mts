@@ -1,26 +1,26 @@
 import $ from 'jquery'
 
-import webmunkSpiderManager, { WebmunkContentSpider } from '@bric/webmunk-spider/spider'
+import rexSpiderManager, { REXContentSpider } from '@bric/rex-spider/spider'
 
-export class WebmunkPerplexityContentSpider extends WebmunkContentSpider {
+export class REXPerplexityContentSpider extends REXContentSpider {
   name():string {
     return 'Perplexity'
   }
 
   toString():string {
-    return 'WebmunkPerplexityContentSpider'
+    return 'REXPerplexityContentSpider'
   }
 
   urlMatches(url:string): boolean {
-    if (window.location.href.toLowerCase() === 'https://www.perplexity.ai/') {
+    if (url.toLowerCase() === 'https://www.perplexity.ai/') {
       return true // Login check page
     }
 
-    if (window.location.href.toLowerCase() === 'https://www.perplexity.ai/library') {
+    if (url.toLowerCase() === 'https://www.perplexity.ai/library') {
       return true // Library page
     }
 
-    if (window.location.href.toLowerCase().startsWith('https://www.perplexity.ai/search/')) {
+    if (url.toLowerCase().startsWith('https://www.perplexity.ai/search/')) {
       return true // Conversation page
     }
 
@@ -62,7 +62,7 @@ export class WebmunkPerplexityContentSpider extends WebmunkContentSpider {
         return
       } else if (window.location.href.toLowerCase() === 'https://www.perplexity.ai/library') {
         console.log(`${this.name()}: Looking for links...`)
-        let urls = []
+        const urls = []
 
         window.setTimeout(() => {
           $('a').each((index, item) => {
@@ -84,7 +84,7 @@ export class WebmunkPerplexityContentSpider extends WebmunkContentSpider {
 
         return
       } else if (window.location.href.toLowerCase().startsWith('https://www.perplexity.ai/search/')) {
-        let conversation = []
+        const conversation = []
 
         $('.group/query').each((index, item) => {
           $(item).find('.select-text').each((turnIndex, turn) => {
@@ -127,7 +127,7 @@ export class WebmunkPerplexityContentSpider extends WebmunkContentSpider {
   }
 }
 
-const spider = new WebmunkPerplexityContentSpider()
-webmunkSpiderManager.registerSpider(spider)
+const spider = new REXPerplexityContentSpider()
+rexSpiderManager.registerSpider(spider)
 
 export default spider

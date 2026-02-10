@@ -1,9 +1,9 @@
 import { Conversation, Turn, DateString, Citation, Search, Result } from '@bric/extension-conversation/types'
 
-import { dispatchEvent } from '@bric/webmunk-core/service-worker'
-import webmunkSpiderPlugin, { WebmunkSpider } from '@bric/webmunk-spider/service-worker'
+import { dispatchEvent } from '@bric/rex-core/service-worker'
+import rexSpiderPlugin, { REXSpider } from '@bric/rex-spider/service-worker'
 
-export class WebmunkPerplexitySpider extends WebmunkSpider {
+export class REXPerplexitySpider extends REXSpider {
   fetchUrls(): string[] {
     return ['https://www.perplexity.ai/library']
   }
@@ -36,7 +36,7 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
           console.log(`[perplexity] index ok?: ${response.ok}`)
 
           if (response.ok) {
-            let toCrawl = []
+            const toCrawl = []
 
             response.json().then((perplexityList) => {
               console.log(`[perplexity] perplexityList`)
@@ -78,7 +78,7 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
 
                             let firstWhenString:DateString = new DateString(result.entries[0]['entry_updated_datetime'])
 
-                            let conversation:Conversation = {
+                            const conversation:Conversation = {
                               turns:[],
                               platform: 'perplexity',
                               identifier:result.entries[0]['thread_url_slug'],
@@ -87,9 +87,9 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
                               metadata: null
                             }
 
-                            let entryIndex = 0
+                            const entryIndex = 0
 
-                            for (let entry of result.entries) { // Each entry is a question and answer pair
+                            for (const entry of result.entries) { // Each entry is a question and answer pair
                               let when = new Date(entry.entry_updated_datetime)
 
                               if (entry.updated_us !== undefined) {
@@ -109,11 +109,11 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
 
                               conversation['ended'] = whenString
 
-                              let responseMetadata = {}
+                              const responseMetadata = {}
 
-                              let citations:Citation[] = []
+                              const citations:Citation[] = []
 
-                              let search:Search = {
+                              const search:Search = {
                                 platform: 'perplexity',
                                 'query*': '',
                                 type: '',
@@ -125,7 +125,7 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
 
                                 for (const step of stepsContent) {
                                   if (step['step_type'] === 'INITIAL_QUERY') {
-                                    let turn:Turn = {
+                                    const turn:Turn = {
                                       speaker: entry['author_username'],
                                       when: whenString,
                                       'content*': step['content']['query'],
@@ -137,7 +137,7 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
 
                                     conversation.turns.push(turn)
                                   } else if (step['step_type'] === 'SEARCH_WEB') {
-                                    for (let query of step['content']['queries'] as []) {
+                                    for (const query of step['content']['queries'] as []) {
                                       if (search['query*'] !== '') {
                                         search['query*'] += '; '
                                       }
@@ -155,8 +155,8 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
                                   } else if (step['step_type'] === 'SEARCH_RESULTS') {
                                     let index = 0
 
-                                    for (let webResult of step['content']['web_results'] as []) {
-                                      let result:Result = {
+                                    for (const webResult of step['content']['web_results'] as []) {
+                                      const result:Result = {
                                         title: webResult['name'],
                                         url: webResult['url'],
                                         preview: webResult['snippet'],
@@ -166,13 +166,15 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
 
                                       search.results.push(result)
 
-                                      let citation:Citation = {
+                                      const citation:Citation = {
                                         title: webResult['name'],
                                         url: webResult['url'],
                                         source: webResult['meta_data']['citation_domain_name']
                                       }
 
                                       citations.push(citation)
+
+                                      index += 1
                                     }
 
                                     responseMetadata['SEARCH_RESULTS'] = step
@@ -182,7 +184,7 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
 
                                     const answer = JSON.parse(step['content']['answer'])
 
-                                    let turn:Turn = {
+                                    const turn:Turn = {
                                       speaker: `perplexity:${entry['author_username']}`,
                                       when: whenString,
                                       'content*': answer['answer'],
@@ -203,7 +205,7 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
                                 }
 
                               } else if (entry['step_type'] !== undefined) {
-                                let turn:Turn = {
+                                const turn:Turn = {
                                   speaker: entry['author_username'],
                                   when: whenString,
                                   'content*': entry['query_str'],
@@ -224,7 +226,7 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
                                       console.log(`webResult`)
                                       console.log(webResult)
 
-                                      let result:Result = {
+                                      const result:Result = {
                                         title: webResult['name'],
                                         url: webResult['url'],
                                         preview: webResult['snippet'],
@@ -234,7 +236,7 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
 
                                       search.results.push(result)
 
-                                      let citation:Citation = {
+                                      const citation:Citation = {
                                         title: webResult['name'],
                                         url: webResult['url'],
                                         source: webResult['meta_data']['citation_domain_name']
@@ -265,7 +267,7 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
                                       }
                                     }
                                   } else if (block['intended_usage'] === 'ask_text') {
-                                    let response:Turn = {
+                                    const response:Turn = {
                                       speaker: `perplexity:${entry['user_selected_model']}`,
                                       when: whenString,
                                       'content*': block['markdown_block']['answer'],
@@ -287,14 +289,14 @@ export class WebmunkPerplexitySpider extends WebmunkSpider {
                               }
                             }
 
-                            let payload:any = conversation
+                            const payload = conversation
 
                             payload['name'] = 'rex-conversation'
                             payload['date'] = firstWhen
 
                             // TODO: add check to see if conversation is actually updated...
 
-                            dispatchEvent(payload)
+                            dispatchEvent(payload as { name: string; [key: string]: unknown })
 
                             console.log(`[perplexity] log:`)
                             console.log(payload)
@@ -398,8 +400,8 @@ chrome.declarativeNetRequest.onRuleMatchedDebug.addListener(function (matchedRul
   console.log('[SPIDER PERPLEX] rule matched:', matchedRule);
 });
 
-const perplexitySpider = new WebmunkPerplexitySpider()
+const perplexitySpider = new REXPerplexitySpider()
 
-webmunkSpiderPlugin.registerSpider(perplexitySpider)
+rexSpiderPlugin.registerSpider(perplexitySpider)
 
 export default perplexitySpider
