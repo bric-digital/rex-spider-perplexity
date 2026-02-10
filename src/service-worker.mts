@@ -1,6 +1,6 @@
 import { Conversation, Turn, DateString, Citation, Search, Result } from '@bric/rex-types/types'
 
-import { EventPayload, dispatchEvent } from '@bric/rex-core/service-worker'
+import rexCorePlugin, { EventPayload, dispatchEvent } from '@bric/rex-core/service-worker'
 import rexSpiderPlugin, { REXSpider } from '@bric/rex-spider/service-worker'
 
 export class REXPerplexitySpider extends REXSpider {
@@ -97,6 +97,8 @@ export class REXPerplexitySpider extends REXSpider {
                           if (result.status === 'success') {
                             let firstWhen = new Date(result.entries[0]['entry_updated_datetime'])
 
+                            let latestDate = firstWhen
+
                             console.log(`parse: ${result.entries[0]['entry_updated_datetime']}`)
 
                             let firstWhenString:DateString = new DateString(result.entries[0]['entry_updated_datetime'])
@@ -128,6 +130,10 @@ export class REXPerplexitySpider extends REXSpider {
                                 firstWhenString = whenString
 
                                 conversation['started'] = whenString
+                              }
+
+                              if (when > latestDate) {
+                                latestDate = when
                               }
 
                               conversation['ended'] = whenString
@@ -310,22 +316,49 @@ export class REXPerplexitySpider extends REXSpider {
                                   conversation.turns[conversation.turns.length - 1]['citations'] =  citations
                                 }
                               }
+
+                              if (when > latestDate) {
+                                latestDate = when
+                              }
                             }
 
-                            const payload:EventPayload = {
-                              name: 'rex-conversation',
-                              date: firstWhen,
-                              ...conversation
+                            const lastUpdateKey = `${conversation.platform}-${conversation.identifier}-last-update`
+
+                            const message = {
+                              messageType: 'fetchValue',
+                              key: lastUpdateKey
                             }
 
-                            // TODO: add check to see if conversation is actually updated...
+                            rexCorePlugin.handleMessage(message, this, (response) => {
+                              const timestamp = response[lastUpdateKey]
 
-                            dispatchEvent(payload)
+                              console.log(`TS TEST ${timestamp} <? ${latestDate.valueOf()}`)
 
-                            console.log(`[perplexity] log:`)
-                            console.log(payload)
+                              if (timestamp < latestDate.valueOf()) {
+                                const payload:EventPayload = {
+                                  name: 'rex-conversation',
+                                  date: firstWhen,
+                                  ...conversation
+                                }
 
-                            fetchConvo()
+                                console.log(`[perplexity] log:`)
+                                console.log(payload)
+
+                                dispatchEvent(payload)
+
+                                const storeMessage = {
+                                  messageType: 'storeValue',
+                                  key: lastUpdateKey,
+                                  value: latestDate.valueOf()
+                                }
+
+                                rexCorePlugin.handleMessage(storeMessage, this, (response) => {
+                                  console.log(`[perplexity] ${lastUpdateKey} = ${latestDate.valueOf()}`)
+                                })
+                              }
+
+                              fetchConvo()
+                            })
                           } else {
                             resolve(true) // Error - fall back to DOM scraping...
                           }
