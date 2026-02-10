@@ -333,7 +333,11 @@ export class REXPerplexitySpider extends REXSpider {
                               console.log(`fetchValue`)
                               console.log(response)
 
-                              const timestamp = response[lastUpdateKey]
+                              let timestamp = 0
+
+                              if (response !== null) {
+                                timestamp = response[lastUpdateKey]
+                              }
 
                               console.log(`TS TEST ${timestamp} <? ${latestDate.valueOf()}`)
 
