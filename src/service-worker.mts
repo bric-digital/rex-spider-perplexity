@@ -1,6 +1,6 @@
 import { Conversation, Turn, DateString, Citation, Search, Result } from '@bric/rex-types/types'
 
-import { dispatchEvent } from '@bric/rex-core/service-worker'
+import { EventPayload, dispatchEvent } from '@bric/rex-core/service-worker'
 import rexSpiderPlugin, { REXSpider } from '@bric/rex-spider/service-worker'
 
 export class REXPerplexitySpider extends REXSpider {
@@ -289,14 +289,15 @@ export class REXPerplexitySpider extends REXSpider {
                               }
                             }
 
-                            const payload = conversation
-
-                            payload['name'] = 'rex-conversation'
-                            payload['date'] = firstWhen
+                            const payload:EventPayload = {
+                              name: 'rex-conversation',
+                              date: firstWhen,
+                              ...conversation
+                            }
 
                             // TODO: add check to see if conversation is actually updated...
 
-                            dispatchEvent(payload as { name: string; [key: string]: unknown })
+                            dispatchEvent(payload)
 
                             console.log(`[perplexity] log:`)
                             console.log(payload)
