@@ -24,8 +24,6 @@ export class REXPerplexitySpider extends REXSpider {
     return new Promise<boolean>((resolve) => {
       const indexUrl = 'https://www.perplexity.ai/rest/thread/list_recent?version=2.18&source=default'
 
-      console.log(`[perplexity] index: ${indexUrl}`)
-
       fetch(indexUrl)
         .then((response: Response) => {
           if (response.ok) {
@@ -44,35 +42,23 @@ export class REXPerplexitySpider extends REXSpider {
   }
 
   checkNeedsUpdate(): Promise<boolean> {
-    console.log('[perplexity] returning checkNeedsUpdate promise...')
-
     return new Promise<boolean>((resolve) => {
       // Assuming logged in...
 
-      console.log('[perplexity] from service worker')
       const indexUrl = 'https://www.perplexity.ai/rest/thread/list_recent?version=2.18&source=default'
-
-      console.log(`[perplexity] index: ${indexUrl}`)
 
       fetch(indexUrl)
         .then((response: Response) => {
-          console.log(`[perplexity] index ok?: ${response.ok}`)
-
           if (response.ok) {
             const toCrawl = []
 
             response.json().then((perplexityList) => {
-              console.log(`[perplexity] perplexityList`)
-              console.log(perplexityList)
-
               for (const convo of perplexityList) {
                 if (convo.link !== undefined) {
                   const tokens = convo.link.split('/')
 
                   if (tokens[1] === 'search') {
                     const fullUrl = `https://www.perplexity.ai/rest/thread/${tokens[2]}?with_parent_info=true&with_schematized_response=true&version=2.18&source=default&limit=10&offset=0&from_first=true&supported_block_use_cases=answer_modes&supported_block_use_cases=media_items&supported_block_use_cases=knowledge_cards&supported_block_use_cases=inline_entity_cards&supported_block_use_cases=place_widgets&supported_block_use_cases=finance_widgets&supported_block_use_cases=prediction_market_widgets&supported_block_use_cases=sports_widgets&supported_block_use_cases=flight_status_widgets&supported_block_use_cases=news_widgets&supported_block_use_cases=shopping_widgets&supported_block_use_cases=jobs_widgets&supported_block_use_cases=search_result_widgets&supported_block_use_cases=inline_images&supported_block_use_cases=inline_assets&supported_block_use_cases=placeholder_cards&supported_block_use_cases=diff_blocks&supported_block_use_cases=inline_knowledge_cards&supported_block_use_cases=entity_group_v2&supported_block_use_cases=refinement_filters&supported_block_use_cases=canvas_mode&supported_block_use_cases=maps_preview&supported_block_use_cases=answer_tabs&supported_block_use_cases=price_comparison_widgets&supported_block_use_cases=preserve_latex&supported_block_use_cases=generic_onboarding_widgets&supported_block_use_cases=in_context_suggestions`
-
-                    console.log(`[perplexity] add: ${fullUrl}`)
 
                     toCrawl.push(fullUrl)
                   }
@@ -85,21 +71,16 @@ export class REXPerplexitySpider extends REXSpider {
                 } else {
                   const nextUrl = toCrawl.pop()
 
-                  console.log(`[perplexity] crawl: ${nextUrl}`)
+                  console.log(`[rex-spider-perplexity] crawl: ${nextUrl}`)
 
                   fetch(nextUrl)
                     .then((convoResponse: Response) => {
                       if (convoResponse.ok) {
                         convoResponse.json().then((result) => {
-                          console.log(`[perplexity] ok/json: ${nextUrl}`)
-                          console.log(result)
-
                           if (result.status === 'success') {
                             let firstWhen = new Date(result.entries[0]['entry_updated_datetime'])
 
                             let latestDate = firstWhen
-
-                            console.log(`parse: ${result.entries[0]['entry_updated_datetime']}`)
 
                             let firstWhenString:DateString = new DateString(result.entries[0]['entry_updated_datetime'])
 
@@ -120,8 +101,6 @@ export class REXPerplexitySpider extends REXSpider {
                               if (entry.updated_us !== undefined) {
                                 when = new Date(entry.updated_us / 1000)
                               }
-
-                              console.log(`when ${when} -- ${entry.updated_us}`)
 
                               const whenString = new DateString(when.toISOString())
 
@@ -245,16 +224,10 @@ export class REXPerplexitySpider extends REXSpider {
                                 conversation.turns.push(turn)
 
                                 for (const block of entry.blocks) {
-                                  console.log(`block`)
-                                  console.log(block)
-
                                   if (block['intended_usage'] === 'sources_answer_mode') {
                                     let index = 0
 
                                     for (const webResult of block['sources_mode_block']['web_results']) {
-                                      console.log(`webResult`)
-                                      console.log(webResult)
-
                                       const result:Result = {
                                         title: webResult['name'],
                                         url: webResult['url'],
@@ -330,16 +303,13 @@ export class REXPerplexitySpider extends REXSpider {
                             }
 
                             rexCorePlugin.handleMessage(message, this, (response) => {
-                              console.log(`fetchValue`)
-                              console.log(response)
-
                               let timestamp = 0
 
                               if (response !== null) {
                                 timestamp = response
                               }
 
-                              console.log(`TS TEST ${timestamp} <? ${latestDate.valueOf()}`)
+                              console.log(`[rex-spider-perplexity] TS TEST ${timestamp} <? ${latestDate.valueOf()}`)
 
                               if (timestamp < latestDate.valueOf()) {
                                 const payload:EventPayload = {
@@ -348,7 +318,7 @@ export class REXPerplexitySpider extends REXSpider {
                                   ...conversation
                                 }
 
-                                console.log(`[perplexity] log:`)
+                                console.log(`[rex-spider-perplexity] log:`)
                                 console.log(payload)
 
                                 dispatchEvent(payload)
@@ -360,7 +330,7 @@ export class REXPerplexitySpider extends REXSpider {
                                 }
 
                                 rexCorePlugin.handleMessage(storeMessage, this, (response) => {
-                                  console.log(`[perplexity] ${lastUpdateKey} = ${latestDate.valueOf()}`)
+                                  console.log(`[rex-spider-perplexity] ${lastUpdateKey} = ${latestDate.valueOf()}`)
                                 })
                               }
 
@@ -403,8 +373,6 @@ const stringToId = function (str:string) {
 
 const urlFilter = '||perplexity.ai/'
 
-console.log(`urlFilter: ${urlFilter}`)
-
 const stripRule = {
   id: stringToId('perplexity-strip'),
   priority: 1,
@@ -439,29 +407,25 @@ chrome.declarativeNetRequest.updateSessionRules({ // updateSessionRules({
   addRules: [stripRule]
 }, () => {
   if (chrome.runtime['lastError']) {
-    console.log('[chrome.declarativeNetRequest] ' + chrome.runtime['lastError'].message)
+    console.log('[rex-spider-perplexity / chrome.declarativeNetRequest] ' + chrome.runtime['lastError'].message)
   } else {
-    console.log(`[SPIDER] ${urlFilter} installed`)
+    console.log(`[rex-spider-perplexity] ${urlFilter} installed`)
 
     chrome.declarativeNetRequest.getSessionRules()
       .then((rules) => {
-        console.log('CONFIRM RULES')
-        console.log(rules)
-
         chrome.declarativeNetRequest.testMatchOutcome({
           url: 'https://www.perplexity.ai/',
           type: 'sub_frame'
         })
         .then((result) => {
-          console.log('TEST RESULT')
-          console.log(result)
+
         })
       })
   }
 })
 
 chrome.declarativeNetRequest.onRuleMatchedDebug.addListener(function (matchedRule) {
-  console.log('[SPIDER PERPLEX] rule matched:', matchedRule);
+  console.log('[rex-spider-perplexity] Rule matched:', matchedRule);
 });
 
 const perplexitySpider = new REXPerplexitySpider()
