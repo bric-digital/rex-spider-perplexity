@@ -55,6 +55,9 @@ export class REXPerplexitySpider extends REXSpider {
             const toCrawl = []
 
             response.json().then((perplexityList) => {
+              console.log(`[rex-spider-perplexity] Index content:`)
+              console.log(perplexityList)
+
               for (const convo of perplexityList) {
                 if (convo.link !== undefined) {
                   const tokens = convo.link.split('/')
