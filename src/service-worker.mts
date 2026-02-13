@@ -4,6 +4,8 @@ import rexCorePlugin, { EventPayload, dispatchEvent } from '@bric/rex-core/servi
 import rexSpiderPlugin, { REXSpider } from '@bric/rex-spider/service-worker'
 
 export class REXPerplexitySpider extends REXSpider {
+  sleepDelayMs:number = 60000
+
   fetchUrls(): string[] {
     return ['https://www.perplexity.ai/library']
   }
@@ -363,7 +365,9 @@ export class REXPerplexitySpider extends REXSpider {
                 }
               }
 
-              fetchConvo()
+              window.setTimeout(() => {
+                fetchConvo()
+              }, this.sleepDelayMs)
             })
           } else {
             resolve(true) // Error - fall back to DOM scraping...
