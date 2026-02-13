@@ -2,6 +2,7 @@ import { Conversation, Turn, DateString, Citation, Search, Result } from '@bric/
 
 import rexCorePlugin, { EventPayload, dispatchEvent } from '@bric/rex-core/service-worker'
 import rexSpiderPlugin, { REXSpider } from '@bric/rex-spider/service-worker'
+import { extractCitationSource } from './citation-utils.mjs'
 
 export class REXPerplexitySpider extends REXSpider {
   fetchUrls(): string[] {
@@ -198,7 +199,7 @@ export class REXPerplexitySpider extends REXSpider {
                                       const citation:Citation = {
                                         title: webResult['name'],
                                         url: webResult['url'],
-                                        source: webResult['meta_data']['citation_domain_name']
+                                        source: extractCitationSource(webResult)
                                       }
 
                                       citations.push(citation)
@@ -268,7 +269,7 @@ export class REXPerplexitySpider extends REXSpider {
                                       const citation:Citation = {
                                         title: webResult['name'],
                                         url: webResult['url'],
-                                        source: webResult['meta_data']['citation_domain_name']
+                                        source: extractCitationSource(webResult)
                                       }
 
                                       citations.push(citation)
@@ -359,7 +360,7 @@ export class REXPerplexitySpider extends REXSpider {
                                   value: latestDate.valueOf()
                                 }
 
-                                rexCorePlugin.handleMessage(storeMessage, this, (response) => {
+                                rexCorePlugin.handleMessage(storeMessage, this, () => {
                                   console.log(`[perplexity] ${lastUpdateKey} = ${latestDate.valueOf()}`)
                                 })
                               }
