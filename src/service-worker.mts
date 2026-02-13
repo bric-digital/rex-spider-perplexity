@@ -365,7 +365,7 @@ export class REXPerplexitySpider extends REXSpider {
                 }
               }
 
-              window.setTimeout(() => {
+              self.setTimeout(() => {
                 fetchConvo()
               }, this.sleepDelayMs)
             })
