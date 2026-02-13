@@ -82,7 +82,7 @@ export class REXPerplexitySpider extends REXSpider {
           value: Date.now()
         }
 
-        rexCorePlugin.handleMessage(storeMessage, this, (response) => {
+        rexCorePlugin.handleMessage(storeMessage, this, (response) => { // eslint-disable-line @typescript-eslint/no-unused-vars
           this.syncing = true
 
           const indexUrl = 'https://www.perplexity.ai/rest/thread/list_recent?version=2.18&source=default'
@@ -378,7 +378,7 @@ export class REXPerplexitySpider extends REXSpider {
                                         value: latestDate.valueOf()
                                       }
 
-                                      rexCorePlugin.handleMessage(storeMessage, this, (response) => {
+                                      rexCorePlugin.handleMessage(storeMessage, this, (response) => { // eslint-disable-line @typescript-eslint/no-unused-vars
                                         console.log(`[rex-spider-perplexity] ${lastUpdateKey} = ${latestDate.valueOf()}`)
                                       })
                                     }
@@ -398,7 +398,7 @@ export class REXPerplexitySpider extends REXSpider {
 
                               resolve(true) // Error - fall back to DOM scraping...
                             }
-                        })
+                          })
                       }, this.sleepDelayMs)
                     }
                   }
@@ -413,6 +413,7 @@ export class REXPerplexitySpider extends REXSpider {
       })
     })
   }
+}
 
 const stringToId = function (str:string) {
   let id:number = str.length
@@ -469,12 +470,12 @@ chrome.declarativeNetRequest.updateSessionRules({ // updateSessionRules({
     console.log(`[rex-spider-perplexity] ${urlFilter} installed`)
 
     chrome.declarativeNetRequest.getSessionRules()
-      .then((rules) => {
+      .then((rules) => { // eslint-disable-line @typescript-eslint/no-unused-vars
         chrome.declarativeNetRequest.testMatchOutcome({
           url: 'https://www.perplexity.ai/',
           type: 'sub_frame'
         })
-        .then((result) => {
+        .then((result) => { // eslint-disable-line @typescript-eslint/no-unused-vars
 
         })
       })
