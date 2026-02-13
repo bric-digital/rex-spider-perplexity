@@ -72,6 +72,9 @@ export class REXPerplexitySpider extends REXSpider {
                 }
               }
 
+              console.log(`[rex-spider-perplexity] Crawl list:`)
+              console.log(toCrawl)
+
               const fetchConvo = () => {
                 if (toCrawl.length == 0) {
                   resolve(false)
@@ -344,10 +347,16 @@ export class REXPerplexitySpider extends REXSpider {
                               fetchConvo()
                             })
                           } else {
+                            console.log(`[rex-spider-perplexity] Crawl failed ${nextUrl}. Content:`)
+                            console.log(convoResponse)
+
                             resolve(true) // Error - fall back to DOM scraping...
                           }
                         })
                       } else {
+                        console.log(`[rex-spider-perplexity] Crawl failed ${nextUrl}. Response:`)
+                        console.log(convoResponse)
+
                         resolve(true) // Error - fall back to DOM scraping...
                       }
                     })
