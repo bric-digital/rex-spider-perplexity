@@ -42,6 +42,8 @@ export class REXPerplexitySpider extends REXSpider {
   }
 
   checkNeedsUpdate(): Promise<boolean> {
+    console.log(`[rex-spider-perplexity] checkNeedsUpdate`)
+
     return new Promise<boolean>((resolve) => {
       // Assuming logged in...
 
@@ -60,7 +62,9 @@ export class REXPerplexitySpider extends REXSpider {
                   if (tokens[1] === 'search') {
                     const fullUrl = `https://www.perplexity.ai/rest/thread/${tokens[2]}?with_parent_info=true&with_schematized_response=true&version=2.18&source=default&limit=10&offset=0&from_first=true&supported_block_use_cases=answer_modes&supported_block_use_cases=media_items&supported_block_use_cases=knowledge_cards&supported_block_use_cases=inline_entity_cards&supported_block_use_cases=place_widgets&supported_block_use_cases=finance_widgets&supported_block_use_cases=prediction_market_widgets&supported_block_use_cases=sports_widgets&supported_block_use_cases=flight_status_widgets&supported_block_use_cases=news_widgets&supported_block_use_cases=shopping_widgets&supported_block_use_cases=jobs_widgets&supported_block_use_cases=search_result_widgets&supported_block_use_cases=inline_images&supported_block_use_cases=inline_assets&supported_block_use_cases=placeholder_cards&supported_block_use_cases=diff_blocks&supported_block_use_cases=inline_knowledge_cards&supported_block_use_cases=entity_group_v2&supported_block_use_cases=refinement_filters&supported_block_use_cases=canvas_mode&supported_block_use_cases=maps_preview&supported_block_use_cases=answer_tabs&supported_block_use_cases=price_comparison_widgets&supported_block_use_cases=preserve_latex&supported_block_use_cases=generic_onboarding_widgets&supported_block_use_cases=in_context_suggestions`
 
-                    toCrawl.push(fullUrl)
+                    if (toCrawl.includes(fullUrl) === false) {
+                      toCrawl.push(fullUrl)
+                    }
                   }
                 }
               }
@@ -71,7 +75,7 @@ export class REXPerplexitySpider extends REXSpider {
                 } else {
                   const nextUrl = toCrawl.pop()
 
-                  console.log(`[rex-spider-perplexity] crawl: ${nextUrl}`)
+                  console.log(`[rex-spider-perplexity] Crawl: ${nextUrl}`)
 
                   fetch(nextUrl)
                     .then((convoResponse: Response) => {
