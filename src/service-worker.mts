@@ -118,7 +118,7 @@ export class REXPerplexitySpider extends REXSpider {
                       resolve(false)
                     } else {
                       self.setTimeout(() => {
-                        const nextUrl = toCrawl.pop()
+                        const nextUrl = toCrawl.shift()
 
                         console.log(`[rex-spider-perplexity] Crawl: ${nextUrl}`)
 
@@ -223,10 +223,16 @@ export class REXPerplexitySpider extends REXSpider {
 
                                             search.results.push(result)
 
+                                            let citationDomainName:string|undefined = webResult['meta_data']['citation_domain_name']
+
+                                            if (citationDomainName === undefined) { // TODO - write test
+                                              citationDomainName = 'perplexity.unknown:citation_domain_name'
+                                            }
+
                                             const citation:Citation = {
                                               title: webResult['name'],
                                               url: webResult['url'],
-                                              source: webResult['meta_data']['citation_domain_name']
+                                              source: citationDomainName,
                                             }
 
                                             citations.push(citation)
