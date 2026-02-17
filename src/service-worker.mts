@@ -118,7 +118,7 @@ export class REXPerplexitySpider extends REXSpider {
                       resolve(false)
                     } else {
                       self.setTimeout(() => {
-                        const nextUrl = toCrawl.pop()
+                        const nextUrl = toCrawl.shift()
 
                         console.log(`[rex-spider-perplexity] Crawl: ${nextUrl}`)
 
