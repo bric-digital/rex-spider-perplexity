@@ -223,7 +223,11 @@ export class REXPerplexitySpider extends REXSpider {
 
                                             search.results.push(result)
 
-                                            let citationDomainName:string|undefined = webResult['meta_data']['citation_domain_name']
+                                            let citationDomainName:string|undefined = undefined
+
+                                            if (webResult['meta_data'] !== undefined) {
+                                              citationDomainName = webResult['meta_data']['citation_domain_name']
+                                            }
 
                                             if (citationDomainName === undefined) { // TODO - write test
                                               citationDomainName = 'perplexity.unknown:citation_domain_name'
@@ -293,7 +297,11 @@ export class REXPerplexitySpider extends REXSpider {
 
                                             search.results.push(result)
 
-                                            let citationDomainName:string|undefined = webResult['meta_data']['citation_domain_name']
+                                            let citationDomainName:string|undefined = undefined
+
+                                            if (webResult['meta_data'] !== undefined) {
+                                              citationDomainName = webResult['meta_data']['citation_domain_name']
+                                            }
 
                                             if (citationDomainName === undefined) { // TODO - write test
                                               citationDomainName = 'perplexity.unknown:citation_domain_name'
