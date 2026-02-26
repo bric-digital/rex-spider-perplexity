@@ -139,7 +139,7 @@ export class REXPerplexitySpider extends REXSpider {
                                     identifier:result.entries[0]['thread_url_slug'],
                                     started:firstWhenString,
                                     ended:firstWhenString,
-                                    metadata: null
+                                    metadata: result // TODO: Pull out and only populate when configured.
                                   }
 
                                   const entryIndex = 0
