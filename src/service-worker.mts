@@ -441,6 +441,7 @@ export class REXPerplexitySpider extends REXSpider {
                                   console.log(`[rex-spider-perplexity] Crawl failed ${nextUrl}. Content:`)
                                   console.log(convoResponse)
 
+                                  this.dispatchCompletionEvent(crawledCount)
                                   resolve(true) // Error - fall back to DOM scraping...
                                 }
                               })
@@ -448,6 +449,7 @@ export class REXPerplexitySpider extends REXSpider {
                               console.log(`[rex-spider-perplexity] Crawl failed ${nextUrl}. Response:`)
                               console.log(convoResponse)
 
+                              this.dispatchCompletionEvent(crawledCount)
                               resolve(true) // Error - fall back to DOM scraping...
                             }
                           })
@@ -458,6 +460,7 @@ export class REXPerplexitySpider extends REXSpider {
                   fetchConvo()
                 })
               } else {
+                this.dispatchCompletionEvent(0)
                 resolve(true) // Error - fall back to DOM scraping...
               }
             })
