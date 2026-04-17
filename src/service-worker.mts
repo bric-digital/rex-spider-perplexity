@@ -29,9 +29,12 @@ export class REXPerplexitySpider extends REXSpider {
     // persist debounce to expire so queued events flush before the signal.
     setTimeout(() => {
       dispatchEvent({
-        name: 'rex-spider-perplexity-complete',
-        crawled_count: crawledCount,
-        date: Date.now()
+        name: 'pdk-app-event',
+        event_name: 'rex-spider-perplexity-complete',
+        event_details: {
+          crawled_count: crawledCount,
+          date: Date.now()
+        }
       })
     }, 1100)
   }
@@ -463,6 +466,12 @@ export class REXPerplexitySpider extends REXSpider {
                 this.dispatchCompletionEvent(0)
                 resolve(true) // Error - fall back to DOM scraping...
               }
+            })
+            .catch((err) => {
+              console.log(`[rex-spider-perplexity] Unexpected error during sync:`, err)
+              this.syncing = false
+              this.dispatchCompletionEvent(0)
+              resolve(true) // Error - fall back to DOM scraping...
             })
         })
       })
