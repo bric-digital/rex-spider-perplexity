@@ -3,6 +3,8 @@ import { Conversation, Turn, DateString, Citation, Search, Result } from '@bric/
 import rexCorePlugin, { EventPayload, dispatchEvent } from '@bric/rex-core/service-worker'
 import rexSpiderPlugin, { REXSpider } from '@bric/rex-spider/service-worker'
 
+import { CrawlTarget, shouldCrawl } from './crawl-target.mjs'
+
 export class REXPerplexitySpider extends REXSpider {
   sleepDelayMs:number = 10000
   lookbackDays:number = 30
@@ -84,6 +86,69 @@ export class REXPerplexitySpider extends REXSpider {
           }
         })
     })
+  }
+
+  private fetchLastUpdate(conversationId: string): Promise<number | null> {
+    return new Promise((resolve) => {
+      const key = `perplexity-${conversationId}-last-update`
+      rexCorePlugin.handleMessage({ messageType: 'fetchValue', key }, this, (response) => {
+        if (typeof response === 'number') {
+          resolve(response)
+        } else {
+          resolve(null)
+        }
+      })
+    })
+  }
+
+  private storeLastUpdate(conversationId: string, listingUpdateMs: number): Promise<void> {
+    return new Promise((resolve) => {
+      const key = `perplexity-${conversationId}-last-update`
+      rexCorePlugin.handleMessage(
+        { messageType: 'storeValue', key, value: listingUpdateMs },
+        this,
+        () => resolve()
+      )
+    })
+  }
+
+  private updateTimeMs(raw: unknown): number | null {
+    if (typeof raw === 'string') {
+      // list_ask_threads reports naive ISO-8601 (e.g. "2026-04-21T17:51:13.021534").
+      const parsed = Date.parse(raw)
+      if (!Number.isNaN(parsed)) {
+        return parsed
+      }
+    }
+    if (typeof raw === 'number') {
+      // Heuristic fallback in case Perplexity ever switches to epoch numbers:
+      // values below year-2100-in-seconds are treated as seconds, otherwise ms.
+      if (raw < 4_102_444_800) {
+        return raw * 1000
+      }
+      return raw
+    }
+    return null
+  }
+
+  private async pagingCutoff(): Promise<number> {
+    let installTime: number | null = null
+    try {
+      const response = await chrome.runtime.sendMessage({ messageType: 'getInstallTime' })
+      if (typeof response === 'number') {
+        installTime = response
+      }
+    } catch (err) {
+      console.log(`[rex-spider-perplexity] getInstallTime unavailable:`, err)
+    }
+    // Anchor the lookback window at install time so that as the study runs, the
+    // pre-study buffer stays fixed at (install - lookback_days). Conversations
+    // updated between install and now are always included. Fall back to
+    // (now - lookback_days) when install time isn't known.
+    const anchor = installTime !== null ? installTime : Date.now()
+    const cutoff = anchor - this.lookbackDays * 86_400_000
+    console.log(`[rex-spider-perplexity] Paging cutoff: ${new Date(cutoff).toISOString()} (lookbackDays=${this.lookbackDays}, installTime=${installTime})`)
+    return cutoff
   }
 
   checkNeedsUpdate(): Promise<boolean> {
