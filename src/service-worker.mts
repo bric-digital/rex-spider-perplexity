@@ -266,47 +266,33 @@ export class REXPerplexitySpider extends REXSpider {
         rexCorePlugin.handleMessage(storeMessage, this, (response) => { // eslint-disable-line @typescript-eslint/no-unused-vars
           this.syncing = true
 
-          const indexUrl = 'https://www.perplexity.ai/rest/thread/list_recent?version=2.18&source=default'
+          this.pagingCutoff()
+            .then((cutoff) => this.pageIndex(cutoff))
+            .then(({ toCrawl, firstPageFailed }) => {
+              if (firstPageFailed) {
+                console.log(`[rex-spider-perplexity] First index page failed; falling back to DOM scraping.`)
+                this.syncing = false
+                this.dispatchCompletionEvent(0)
+                resolve(true) // Error - fall back to DOM scraping...
+                return
+              }
 
-          fetch(indexUrl)
-            .then((response: Response) => {
-              if (response.ok) {
-                const toCrawl = []
+              let crawledCount = 0
 
-                let crawledCount = 0
+              console.log(`[rex-spider-perplexity] Crawl list (${toCrawl.length} threads):`)
+              console.log(toCrawl)
 
-                response.json().then((perplexityList) => {
-                  console.log(`[rex-spider-perplexity] Index content:`)
-                  console.log(perplexityList)
-
-                  for (const convo of perplexityList) {
-                    if (convo.link !== undefined) {
-                      const tokens = convo.link.split('/')
-
-                      if (tokens[1] === 'search') {
-                        const fullUrl = `https://www.perplexity.ai/rest/thread/${tokens[2]}?with_parent_info=true&with_schematized_response=true&version=2.18&source=default&limit=10&offset=0&from_first=true&supported_block_use_cases=answer_modes&supported_block_use_cases=media_items&supported_block_use_cases=knowledge_cards&supported_block_use_cases=inline_entity_cards&supported_block_use_cases=place_widgets&supported_block_use_cases=finance_widgets&supported_block_use_cases=prediction_market_widgets&supported_block_use_cases=sports_widgets&supported_block_use_cases=flight_status_widgets&supported_block_use_cases=news_widgets&supported_block_use_cases=shopping_widgets&supported_block_use_cases=jobs_widgets&supported_block_use_cases=search_result_widgets&supported_block_use_cases=inline_images&supported_block_use_cases=inline_assets&supported_block_use_cases=placeholder_cards&supported_block_use_cases=diff_blocks&supported_block_use_cases=inline_knowledge_cards&supported_block_use_cases=entity_group_v2&supported_block_use_cases=refinement_filters&supported_block_use_cases=canvas_mode&supported_block_use_cases=maps_preview&supported_block_use_cases=answer_tabs&supported_block_use_cases=price_comparison_widgets&supported_block_use_cases=preserve_latex&supported_block_use_cases=generic_onboarding_widgets&supported_block_use_cases=in_context_suggestions`
-
-                        if (toCrawl.includes(fullUrl) === false) {
-                          toCrawl.push(fullUrl)
-                        }
-                      }
-                    }
-                  }
-
-                  console.log(`[rex-spider-perplexity] Crawl list:`)
-                  console.log(toCrawl)
-
-                  const fetchConvo = () => {
+              const fetchConvo = () => {
                     if (toCrawl.length == 0) {
                       this.dispatchCompletionEvent(crawledCount)
                       resolve(false)
                     } else {
                       self.setTimeout(() => {
-                        const nextUrl = toCrawl.shift()
+                        const next = toCrawl.shift()!
 
-                        console.log(`[rex-spider-perplexity] Crawl: ${nextUrl}`)
+                        console.log(`[rex-spider-perplexity] Crawl: ${next.url}`)
 
-                        fetch(nextUrl)
+                        fetch(next.url)
                           .then((convoResponse: Response) => {
                             if (convoResponse.ok) {
                               convoResponse.json().then((result) => {
@@ -591,7 +577,7 @@ export class REXPerplexitySpider extends REXSpider {
                                     fetchConvo()
                                   })
                                 } else {
-                                  console.log(`[rex-spider-perplexity] Crawl failed ${nextUrl}. Content:`)
+                                  console.log(`[rex-spider-perplexity] Crawl failed ${next.url}. Content:`)
                                   console.log(convoResponse)
 
                                   this.dispatchCompletionEvent(crawledCount)
@@ -599,7 +585,7 @@ export class REXPerplexitySpider extends REXSpider {
                                 }
                               })
                             } else {
-                              console.log(`[rex-spider-perplexity] Crawl failed ${nextUrl}. Response:`)
+                              console.log(`[rex-spider-perplexity] Crawl failed ${next.url}. Response:`)
                               console.log(convoResponse)
 
                               this.dispatchCompletionEvent(crawledCount)
@@ -610,12 +596,7 @@ export class REXPerplexitySpider extends REXSpider {
                     }
                   }
 
-                  fetchConvo()
-                })
-              } else {
-                this.dispatchCompletionEvent(0)
-                resolve(true) // Error - fall back to DOM scraping...
-              }
+              fetchConvo()
             })
             .catch((err) => {
               console.log(`[rex-spider-perplexity] Unexpected error during sync:`, err)
