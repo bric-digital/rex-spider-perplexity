@@ -151,6 +151,81 @@ export class REXPerplexitySpider extends REXSpider {
     return cutoff
   }
 
+  private async pageIndex(cutoff: number): Promise<{ toCrawl: CrawlTarget[], firstPageFailed: boolean }> {
+    // Perplexity's library page uses list_ask_threads (POST, offset/limit in JSON body)
+    // for its infinite scroll. list_recent (used by the sidebar) does not paginate.
+    const pageSize = 20
+    const indexUrl = 'https://www.perplexity.ai/rest/thread/list_ask_threads?version=2.18&source=default'
+    const toCrawl: CrawlTarget[] = []
+
+    let offset = 0
+    let pageIndex = 0
+    let stop = false
+
+    while (!stop && pageIndex < this.maxIndexPages) {
+      console.log(`[rex-spider-perplexity] Index page ${pageIndex} (offset=${offset})`)
+
+      const response = await fetch(indexUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          limit: pageSize,
+          ascending: false,
+          offset,
+          search_term: '',
+          exclude_asi: false
+        })
+      })
+
+      if (!response.ok) {
+        console.log(`[rex-spider-perplexity] Index page ${pageIndex} failed (status ${response.status}).`)
+        if (pageIndex === 0) {
+          return { toCrawl: [], firstPageFailed: true }
+        }
+        break
+      }
+
+      const body = await response.json()
+      const items: any[] = Array.isArray(body) ? body : [] // eslint-disable-line @typescript-eslint/no-explicit-any
+
+      for (const item of items) {
+        const itemUpdateMs = this.updateTimeMs(item?.last_query_datetime)
+        if (itemUpdateMs === null) continue
+
+        if (itemUpdateMs >= cutoff) {
+          // conversationId MUST equal conversation.identifier used by the detail parser
+          // (thread_url_slug) so that the dedup key `perplexity-${id}-last-update` is the
+          // same on both the pre-fetch shouldCrawl check and the post-parse store.
+          const threadId = item?.slug
+          if (typeof threadId === 'string' && threadId.length > 0) {
+            const stored = await this.fetchLastUpdate(threadId)
+            if (!shouldCrawl(itemUpdateMs, stored)) {
+              console.log(`[rex-spider-perplexity] Skipping ${threadId} — listing update_time (${itemUpdateMs}) not newer than stored (${stored})`)
+              continue
+            }
+            const fullUrl = `https://www.perplexity.ai/rest/thread/${threadId}?with_parent_info=true&with_schematized_response=true&version=2.18&source=default&limit=10&offset=0&from_first=true&supported_block_use_cases=answer_modes&supported_block_use_cases=media_items&supported_block_use_cases=knowledge_cards&supported_block_use_cases=inline_entity_cards&supported_block_use_cases=place_widgets&supported_block_use_cases=finance_widgets&supported_block_use_cases=prediction_market_widgets&supported_block_use_cases=sports_widgets&supported_block_use_cases=flight_status_widgets&supported_block_use_cases=news_widgets&supported_block_use_cases=shopping_widgets&supported_block_use_cases=jobs_widgets&supported_block_use_cases=search_result_widgets&supported_block_use_cases=inline_images&supported_block_use_cases=inline_assets&supported_block_use_cases=placeholder_cards&supported_block_use_cases=diff_blocks&supported_block_use_cases=inline_knowledge_cards&supported_block_use_cases=entity_group_v2&supported_block_use_cases=refinement_filters&supported_block_use_cases=canvas_mode&supported_block_use_cases=maps_preview&supported_block_use_cases=answer_tabs&supported_block_use_cases=price_comparison_widgets&supported_block_use_cases=preserve_latex&supported_block_use_cases=generic_onboarding_widgets&supported_block_use_cases=in_context_suggestions`
+            if (!toCrawl.some((t) => t.conversationId === threadId)) {
+              toCrawl.push({ url: fullUrl, listingUpdateMs: itemUpdateMs, conversationId: threadId })
+            }
+          }
+        } else {
+          // Items are newest-first (ascending:false), so the first below-cutoff item terminates the walk.
+          stop = true
+          break
+        }
+      }
+
+      if (items.length < pageSize) break
+      offset += pageSize
+      pageIndex += 1
+      if (!stop && pageIndex < this.maxIndexPages) {
+        await new Promise((r) => self.setTimeout(r, this.sleepDelayMs))
+      }
+    }
+
+    return { toCrawl, firstPageFailed: false }
+  }
+
   checkNeedsUpdate(): Promise<boolean> {
     console.log(`[rex-spider-perplexity] checkNeedsUpdate`)
 
