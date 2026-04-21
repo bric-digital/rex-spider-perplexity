@@ -5,6 +5,8 @@ import rexSpiderPlugin, { REXSpider } from '@bric/rex-spider/service-worker'
 
 export class REXPerplexitySpider extends REXSpider {
   sleepDelayMs:number = 10000
+  lookbackDays:number = 30
+  maxIndexPages:number = 50
   syncing:boolean = false
   lastSync:number = 0
   syncPeriod:number = 300000
@@ -12,7 +14,7 @@ export class REXPerplexitySpider extends REXSpider {
   constructor() {
     super()
 
-    // Override sleepDelayMs from server config if provided.
+    // Override sleepDelayMs / lookbackDays / maxIndexPages from server config if provided.
     rexCorePlugin.fetchConfiguration()
       .then((config) => {
         const spiderConfig = (config as Record<string, any>)?.spider?.perplexity // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -20,8 +22,16 @@ export class REXPerplexitySpider extends REXSpider {
         if (typeof configuredDelay === 'number') {
           this.sleepDelayMs = configuredDelay
         }
+        const configuredLookback = spiderConfig?.lookback_days
+        if (typeof configuredLookback === 'number') {
+          this.lookbackDays = configuredLookback
+        }
+        const configuredMaxPages = spiderConfig?.max_index_pages
+        if (typeof configuredMaxPages === 'number') {
+          this.maxIndexPages = configuredMaxPages
+        }
       })
-      .catch((err) => console.warn('[rex-spider-perplexity] Failed to read sleep_delay_ms from config:', err))
+      .catch((err) => console.warn('[rex-spider-perplexity] Failed to read spider config:', err))
   }
 
   private dispatchCompletionEvent(crawledCount: number): void {
