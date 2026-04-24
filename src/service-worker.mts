@@ -9,6 +9,36 @@ export class REXPerplexitySpider extends REXSpider {
   lastSync:number = 0
   syncPeriod:number = 300000
 
+  constructor() {
+    super()
+
+    // Override sleepDelayMs from server config if provided.
+    rexCorePlugin.fetchConfiguration()
+      .then((config) => {
+        const spiderConfig = (config as Record<string, any>)?.spider?.perplexity // eslint-disable-line @typescript-eslint/no-explicit-any
+        const configuredDelay = spiderConfig?.sleep_delay_ms
+        if (typeof configuredDelay === 'number') {
+          this.sleepDelayMs = configuredDelay
+        }
+      })
+      .catch((err) => console.warn('[rex-spider-perplexity] Failed to read sleep_delay_ms from config:', err))
+  }
+
+  private dispatchCompletionEvent(crawledCount: number): void {
+    // Delay mirrors the rex-history completion pattern: waits for PDK's
+    // persist debounce to expire so queued events flush before the signal.
+    setTimeout(() => {
+      dispatchEvent({
+        name: 'pdk-app-event',
+        event_name: 'rex-spider-perplexity-complete',
+        event_details: {
+          crawled_count: crawledCount,
+          date: Date.now()
+        }
+      })
+    }, 1100)
+  }
+
   fetchUrls(): string[] {
     return ['https://www.perplexity.ai/library']
   }
@@ -71,6 +101,7 @@ export class REXPerplexitySpider extends REXSpider {
 
         if (Date.now() < timestamp + this.syncPeriod) {
           console.log(`[rex-spider-perplexity] Too soon to sync again. Skipping this round...`)
+          this.dispatchCompletionEvent(0)
           resolve(true)
 
           return
@@ -91,6 +122,8 @@ export class REXPerplexitySpider extends REXSpider {
             .then((response: Response) => {
               if (response.ok) {
                 const toCrawl = []
+
+                let crawledCount = 0
 
                 response.json().then((perplexityList) => {
                   console.log(`[rex-spider-perplexity] Index content:`)
@@ -115,6 +148,7 @@ export class REXPerplexitySpider extends REXSpider {
 
                   const fetchConvo = () => {
                     if (toCrawl.length == 0) {
+                      this.dispatchCompletionEvent(crawledCount)
                       resolve(false)
                     } else {
                       self.setTimeout(() => {
@@ -391,6 +425,7 @@ export class REXPerplexitySpider extends REXSpider {
                                       console.log(payload)
 
                                       dispatchEvent(payload)
+                                      crawledCount += 1
 
                                       const storeMessage = {
                                         messageType: 'storeValue',
@@ -409,6 +444,7 @@ export class REXPerplexitySpider extends REXSpider {
                                   console.log(`[rex-spider-perplexity] Crawl failed ${nextUrl}. Content:`)
                                   console.log(convoResponse)
 
+                                  this.dispatchCompletionEvent(crawledCount)
                                   resolve(true) // Error - fall back to DOM scraping...
                                 }
                               })
@@ -416,6 +452,7 @@ export class REXPerplexitySpider extends REXSpider {
                               console.log(`[rex-spider-perplexity] Crawl failed ${nextUrl}. Response:`)
                               console.log(convoResponse)
 
+                              this.dispatchCompletionEvent(crawledCount)
                               resolve(true) // Error - fall back to DOM scraping...
                             }
                           })
@@ -426,8 +463,15 @@ export class REXPerplexitySpider extends REXSpider {
                   fetchConvo()
                 })
               } else {
+                this.dispatchCompletionEvent(0)
                 resolve(true) // Error - fall back to DOM scraping...
               }
+            })
+            .catch((err) => {
+              console.log(`[rex-spider-perplexity] Unexpected error during sync:`, err)
+              this.syncing = false
+              this.dispatchCompletionEvent(0)
+              resolve(true) // Error - fall back to DOM scraping...
             })
         })
       })
