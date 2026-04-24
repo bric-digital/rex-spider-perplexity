@@ -121,7 +121,7 @@ export class REXPerplexitySpider extends REXSpider {
           fetch(indexUrl)
             .then((response: Response) => {
               if (response.ok) {
-                const toCrawl = []
+                const toCrawl:string[] = []
 
                 let crawledCount = 0
 
@@ -156,306 +156,308 @@ export class REXPerplexitySpider extends REXSpider {
 
                         console.log(`[rex-spider-perplexity] Crawl: ${nextUrl}`)
 
-                        fetch(nextUrl)
-                          .then((convoResponse: Response) => {
-                            if (convoResponse.ok) {
-                              convoResponse.json().then((result) => {
-                                if (result.status === 'success') {
-                                  let firstWhen = new Date(result.entries[0]['entry_updated_datetime'])
+                        if (nextUrl !== undefined) {
+                          fetch(nextUrl)
+                            .then((convoResponse: Response) => {
+                              if (convoResponse.ok) {
+                                convoResponse.json().then((result) => {
+                                  if (result.status === 'success') {
+                                    let firstWhen = new Date(result.entries[0]['entry_updated_datetime'])
 
-                                  let latestDate = firstWhen
+                                    let latestDate = firstWhen
 
-                                  let firstWhenString:DateString = new DateString(result.entries[0]['entry_updated_datetime'])
+                                    // let firstWhenString:DateString = new DateString(result.entries[0]['entry_updated_datetime'])
 
-                                  const conversation:Conversation = {
-                                    turns:[],
-                                    platform: 'perplexity',
-                                    identifier:result.entries[0]['thread_url_slug'],
-                                    started:firstWhenString,
-                                    ended:firstWhenString,
-                                    metadata: result // TODO: Pull out and only populate when configured.
-                                  }
-
-                                  const entryIndex = 0
-
-                                  for (const entry of result.entries) { // Each entry is a question and answer pair
-                                    let when = new Date(entry.entry_updated_datetime)
-
-                                    if (entry.updated_us !== undefined) {
-                                      when = new Date(entry.updated_us / 1000)
-                                    }
-
-                                    const whenString = new DateString(when.toISOString())
-
-                                    if (entryIndex === 0) {
-                                      firstWhen = when
-                                      firstWhenString = whenString
-
-                                      conversation['started'] = whenString
-                                    }
-
-                                    if (when > latestDate) {
-                                      latestDate = when
-                                    }
-
-                                    conversation['ended'] = whenString
-
-                                    const responseMetadata = {}
-
-                                    const citations:Citation[] = []
-
-                                    const search:Search = {
+                                    const conversation:Conversation = {
+                                      turns:[],
                                       platform: 'perplexity',
-                                      'query*': '',
-                                      type: '',
-                                      results: [],
+                                      identifier:result.entries[0]['thread_url_slug'],
+                                      started:firstWhenString,
+                                      ended:firstWhenString,
+                                      metadata: result // TODO: Pull out and only populate when configured.
                                     }
 
-                                    if (entry.text !== undefined) {
-                                      const stepsContent = JSON.parse(entry.text) as []
+                                    const entryIndex = 0
 
-                                      for (const step of stepsContent) {
-                                        if (step['step_type'] === 'INITIAL_QUERY') {
-                                          const turn:Turn = {
-                                            speaker: entry['author_username'],
-                                            when: whenString,
-                                            'content*': step['content']['query'],
-                                            identifier: 'uuid:',
-                                            'metadata*': {
-                                              INITIAL_QUERY: step
+                                    for (const entry of result.entries) { // Each entry is a question and answer pair
+                                      let when = new Date(entry.entry_updated_datetime)
+
+                                      if (entry.updated_us !== undefined) {
+                                        when = new Date(entry.updated_us / 1000)
+                                      }
+
+                                      const whenString = new DateString(when.toISOString())
+
+                                      if (entryIndex === 0) {
+                                        firstWhen = when
+                                        // firstWhenString = whenString
+
+                                        conversation['started'] = whenString
+                                      }
+
+                                      if (when > latestDate) {
+                                        latestDate = when
+                                      }
+
+                                      conversation['ended'] = whenString
+
+                                      const responseMetadata = {}
+
+                                      const citations:Citation[] = []
+
+                                      const search:Search = {
+                                        platform: 'perplexity',
+                                        'query*': '',
+                                        type: '',
+                                        results: [],
+                                      }
+
+                                      if (entry.text !== undefined) {
+                                        const stepsContent = JSON.parse(entry.text) as []
+
+                                        for (const step of stepsContent) {
+                                          if (step['step_type'] === 'INITIAL_QUERY') {
+                                            const turn:Turn = {
+                                              speaker: entry['author_username'],
+                                              when: whenString,
+                                              'content*': step['content']['query'],
+                                              identifier: 'uuid:',
+                                              'metadata*': {
+                                                INITIAL_QUERY: step
+                                              }
                                             }
-                                          }
 
-                                          conversation.turns.push(turn)
-                                        } else if (step['step_type'] === 'SEARCH_WEB') {
-                                          for (const query of step['content']['queries'] as []) {
+                                            conversation.turns.push(turn)
+                                          } else if (step['step_type'] === 'SEARCH_WEB') {
+                                            for (const query of step['content']['queries'] as []) {
+                                              if (search['query*'] !== '') {
+                                                search['query*'] += '; '
+                                              }
+
+                                              search['query*'] += query['query']
+
+                                              if (search['type'] !== '') {
+                                                search['type'] += '; '
+                                              }
+
+                                              search['type'] += query['engine']
+                                            }
+
+                                            responseMetadata['SEARCH_WEB'] = step
+                                          } else if (step['step_type'] === 'SEARCH_RESULTS') {
+                                            let index = 0
+
+                                            for (const webResult of step['content']['web_results'] as []) {
+                                              const result:Result = {
+                                                title: webResult['name'],
+                                                url: webResult['url'],
+                                                preview: webResult['snippet'],
+                                                index,
+                                                metadata: webResult
+                                              }
+
+                                              search.results.push(result)
+
+                                              let citationDomainName:string|undefined = undefined
+
+                                              if (webResult['meta_data'] !== undefined) {
+                                                citationDomainName = webResult['meta_data']['citation_domain_name']
+                                              }
+
+                                              if (citationDomainName === undefined) { // TODO - write test
+                                                citationDomainName = 'perplexity.unknown:citation_domain_name'
+                                              }
+
+                                              const citation:Citation = {
+                                                title: webResult['name'],
+                                                url: webResult['url'],
+                                                source: citationDomainName,
+                                              }
+
+                                              citations.push(citation)
+
+                                              index += 1
+                                            }
+
+                                            responseMetadata['SEARCH_RESULTS'] = step
+
+                                          } else if (step['step_type'] === 'FINAL') {
+                                            responseMetadata['FINAL'] = step
+
+                                            const answer = JSON.parse(step['content']['answer'])
+
+                                            const turn:Turn = {
+                                              speaker: `perplexity:${entry['author_username']}`,
+                                              when: whenString,
+                                              'content*': answer['answer'],
+                                              identifier: 'uuid:',
+                                              'metadata*': responseMetadata,
+                                            }
+
                                             if (search['query*'] !== '') {
-                                              search['query*'] += '; '
+                                              turn['search'] =  search
                                             }
 
-                                            search['query*'] += query['query']
-
-                                            if (search['type'] !== '') {
-                                              search['type'] += '; '
+                                            if (citations.length > 0) {
+                                              turn['citations'] =  citations
                                             }
 
-                                            search['type'] += query['engine']
+                                            conversation.turns.push(turn)
                                           }
-
-                                          responseMetadata['SEARCH_WEB'] = step
-                                        } else if (step['step_type'] === 'SEARCH_RESULTS') {
-                                          let index = 0
-
-                                          for (const webResult of step['content']['web_results'] as []) {
-                                            const result:Result = {
-                                              title: webResult['name'],
-                                              url: webResult['url'],
-                                              preview: webResult['snippet'],
-                                              index,
-                                              metadata: webResult
-                                            }
-
-                                            search.results.push(result)
-
-                                            let citationDomainName:string|undefined = undefined
-
-                                            if (webResult['meta_data'] !== undefined) {
-                                              citationDomainName = webResult['meta_data']['citation_domain_name']
-                                            }
-
-                                            if (citationDomainName === undefined) { // TODO - write test
-                                              citationDomainName = 'perplexity.unknown:citation_domain_name'
-                                            }
-
-                                            const citation:Citation = {
-                                              title: webResult['name'],
-                                              url: webResult['url'],
-                                              source: citationDomainName,
-                                            }
-
-                                            citations.push(citation)
-
-                                            index += 1
-                                          }
-
-                                          responseMetadata['SEARCH_RESULTS'] = step
-
-                                        } else if (step['step_type'] === 'FINAL') {
-                                          responseMetadata['FINAL'] = step
-
-                                          const answer = JSON.parse(step['content']['answer'])
-
-                                          const turn:Turn = {
-                                            speaker: `perplexity:${entry['author_username']}`,
-                                            when: whenString,
-                                            'content*': answer['answer'],
-                                            identifier: 'uuid:',
-                                            'metadata*': responseMetadata,
-                                          }
-
-                                          if (search['query*'] !== '') {
-                                            turn['search'] =  search
-                                          }
-
-                                          if (citations.length > 0) {
-                                            turn['citations'] =  citations
-                                          }
-
-                                          conversation.turns.push(turn)
                                         }
-                                      }
 
-                                    } else if (entry['step_type'] !== undefined) {
-                                      const turn:Turn = {
-                                        speaker: entry['author_username'],
-                                        when: whenString,
-                                        'content*': entry['query_str'],
-                                        identifier: `uuid:${entry['uuid']}`,
-                                        'metadata*': entry
-                                      }
+                                      } else if (entry['step_type'] !== undefined) {
+                                        const turn:Turn = {
+                                          speaker: entry['author_username'],
+                                          when: whenString,
+                                          'content*': entry['query_str'],
+                                          identifier: `uuid:${entry['uuid']}`,
+                                          'metadata*': entry
+                                        }
 
-                                      conversation.turns.push(turn)
+                                        conversation.turns.push(turn)
 
-                                      for (const block of entry.blocks) {
-                                        if (block['intended_usage'] === 'sources_answer_mode') {
-                                          let index = 0
+                                        for (const block of entry.blocks) {
+                                          if (block['intended_usage'] === 'sources_answer_mode') {
+                                            let index = 0
 
-                                          for (const webResult of block['sources_mode_block']['web_results']) {
-                                            const result:Result = {
-                                              title: webResult['name'],
-                                              url: webResult['url'],
-                                              preview: webResult['snippet'],
-                                              index,
-                                              metadata: webResult
+                                            for (const webResult of block['sources_mode_block']['web_results']) {
+                                              const result:Result = {
+                                                title: webResult['name'],
+                                                url: webResult['url'],
+                                                preview: webResult['snippet'],
+                                                index,
+                                                metadata: webResult
+                                              }
+
+                                              search.results.push(result)
+
+                                              let citationDomainName:string|undefined = undefined
+
+                                              if (webResult['meta_data'] !== undefined) {
+                                                citationDomainName = webResult['meta_data']['citation_domain_name']
+                                              }
+
+                                              if (citationDomainName === undefined) { // TODO - write test
+                                                citationDomainName = 'perplexity.unknown:citation_domain_name'
+                                              }
+
+                                              const citation:Citation = {
+                                                title: webResult['name'],
+                                                url: webResult['url'],
+                                                source: citationDomainName
+                                              }
+
+                                              citations.push(citation)
+
+                                              index += 1
                                             }
-
-                                            search.results.push(result)
-
-                                            let citationDomainName:string|undefined = undefined
-
-                                            if (webResult['meta_data'] !== undefined) {
-                                              citationDomainName = webResult['meta_data']['citation_domain_name']
-                                            }
-
-                                            if (citationDomainName === undefined) { // TODO - write test
-                                              citationDomainName = 'perplexity.unknown:citation_domain_name'
-                                            }
-
-                                            const citation:Citation = {
-                                              title: webResult['name'],
-                                              url: webResult['url'],
-                                              source: citationDomainName
-                                            }
-
-                                            citations.push(citation)
-
-                                            index += 1
-                                          }
-                                        } else if (block['intended_usage'] === 'pro_search_steps') {
-                                          for (const searchStep of block['plan_block']['steps']) {
-                                            if (searchStep['step_type'] === 'SEARCH_WEB') {
-                                              for (const searchQuery of searchStep['search_web_content']['queries']) {
-                                                if (search['query*'] !== '') {
-                                                  search['query*'] += '; '
-                                                }
-
-                                                search['query*'] += searchQuery['query']
-
-                                                if (search['type'].includes(searchQuery['engine']) === false) {
-                                                  if (search['type'] !== '') {
-                                                    search['type'] += '; '
+                                          } else if (block['intended_usage'] === 'pro_search_steps') {
+                                            for (const searchStep of block['plan_block']['steps']) {
+                                              if (searchStep['step_type'] === 'SEARCH_WEB') {
+                                                for (const searchQuery of searchStep['search_web_content']['queries']) {
+                                                  if (search['query*'] !== '') {
+                                                    search['query*'] += '; '
                                                   }
 
-                                                  search['type'] += searchQuery['engine']
+                                                  search['query*'] += searchQuery['query']
+
+                                                  if (search['type'].includes(searchQuery['engine']) === false) {
+                                                    if (search['type'] !== '') {
+                                                      search['type'] += '; '
+                                                    }
+
+                                                    search['type'] += searchQuery['engine']
+                                                  }
                                                 }
                                               }
                                             }
-                                          }
-                                        } else if (block['intended_usage'] === 'ask_text') {
-                                          const response:Turn = {
-                                            speaker: `perplexity:${entry['user_selected_model']}`,
-                                            when: whenString,
-                                            'content*': block['markdown_block']['answer'],
-                                            identifier: `uuid:${entry['uuid']}`,
-                                            'metadata*': block
-                                          }
+                                          } else if (block['intended_usage'] === 'ask_text') {
+                                            const response:Turn = {
+                                              speaker: `perplexity:${entry['user_selected_model']}`,
+                                              when: whenString,
+                                              'content*': block['markdown_block']['answer'],
+                                              identifier: `uuid:${entry['uuid']}`,
+                                              'metadata*': block
+                                            }
 
-                                          conversation.turns.push(response)
+                                            conversation.turns.push(response)
+                                          }
+                                        }
+
+                                        if (search['query*'] !== '') {
+                                          conversation.turns[conversation.turns.length - 1]['search'] =  search
+                                        }
+
+                                        if (citations.length > 0) {
+                                          conversation.turns[conversation.turns.length - 1]['citations'] =  citations
                                         }
                                       }
 
-                                      if (search['query*'] !== '') {
-                                        conversation.turns[conversation.turns.length - 1]['search'] =  search
-                                      }
-
-                                      if (citations.length > 0) {
-                                        conversation.turns[conversation.turns.length - 1]['citations'] =  citations
+                                      if (when > latestDate) {
+                                        latestDate = when
                                       }
                                     }
 
-                                    if (when > latestDate) {
-                                      latestDate = when
+                                    const lastUpdateKey = `${conversation.platform}-${conversation.identifier}-last-update`
+
+                                    const message = {
+                                      messageType: 'fetchValue',
+                                      key: lastUpdateKey
                                     }
+
+                                    rexCorePlugin.handleMessage(message, this, (response) => {
+                                      let timestamp = 0
+
+                                      if (response !== null) {
+                                        timestamp = response
+                                      }
+
+                                      console.log(`[rex-spider-perplexity] TS TEST ${timestamp} <? ${latestDate.valueOf()}`)
+
+                                      if (timestamp < latestDate.valueOf()) {
+                                        const payload:EventPayload = {
+                                          name: 'rex-conversation',
+                                          date: firstWhen,
+                                          ...conversation
+                                        }
+
+                                        console.log(`[rex-spider-perplexity] log:`)
+                                        console.log(payload)
+
+                                        dispatchEvent(payload)
+                                        crawledCount += 1
+
+                                        const storeMessage = {
+                                          messageType: 'storeValue',
+                                          key: lastUpdateKey,
+                                          value: latestDate.valueOf()
+                                        }
+
+                                        rexCorePlugin.handleMessage(storeMessage, this, (response) => { // eslint-disable-line @typescript-eslint/no-unused-vars
+                                          console.log(`[rex-spider-perplexity] ${lastUpdateKey} = ${latestDate.valueOf()}`)
+                                        })
+                                      }
+
+                                      fetchConvo()
+                                    })
+                                  } else {
+                                    console.log(`[rex-spider-perplexity] Crawl failed ${nextUrl}. Content:`)
+                                    console.log(convoResponse)
+
+                                    this.dispatchCompletionEvent(crawledCount)
+                                    resolve(true) // Error - fall back to DOM scraping...
                                   }
+                                })
+                              } else {
+                                console.log(`[rex-spider-perplexity] Crawl failed ${nextUrl}. Response:`)
+                                console.log(convoResponse)
 
-                                  const lastUpdateKey = `${conversation.platform}-${conversation.identifier}-last-update`
-
-                                  const message = {
-                                    messageType: 'fetchValue',
-                                    key: lastUpdateKey
-                                  }
-
-                                  rexCorePlugin.handleMessage(message, this, (response) => {
-                                    let timestamp = 0
-
-                                    if (response !== null) {
-                                      timestamp = response
-                                    }
-
-                                    console.log(`[rex-spider-perplexity] TS TEST ${timestamp} <? ${latestDate.valueOf()}`)
-
-                                    if (timestamp < latestDate.valueOf()) {
-                                      const payload:EventPayload = {
-                                        name: 'rex-conversation',
-                                        date: firstWhen,
-                                        ...conversation
-                                      }
-
-                                      console.log(`[rex-spider-perplexity] log:`)
-                                      console.log(payload)
-
-                                      dispatchEvent(payload)
-                                      crawledCount += 1
-
-                                      const storeMessage = {
-                                        messageType: 'storeValue',
-                                        key: lastUpdateKey,
-                                        value: latestDate.valueOf()
-                                      }
-
-                                      rexCorePlugin.handleMessage(storeMessage, this, (response) => { // eslint-disable-line @typescript-eslint/no-unused-vars
-                                        console.log(`[rex-spider-perplexity] ${lastUpdateKey} = ${latestDate.valueOf()}`)
-                                      })
-                                    }
-
-                                    fetchConvo()
-                                  })
-                                } else {
-                                  console.log(`[rex-spider-perplexity] Crawl failed ${nextUrl}. Content:`)
-                                  console.log(convoResponse)
-
-                                  this.dispatchCompletionEvent(crawledCount)
-                                  resolve(true) // Error - fall back to DOM scraping...
-                                }
-                              })
-                            } else {
-                              console.log(`[rex-spider-perplexity] Crawl failed ${nextUrl}. Response:`)
-                              console.log(convoResponse)
-
-                              this.dispatchCompletionEvent(crawledCount)
-                              resolve(true) // Error - fall back to DOM scraping...
-                            }
-                          })
+                                this.dispatchCompletionEvent(crawledCount)
+                                resolve(true) // Error - fall back to DOM scraping...
+                              }
+                            })
+                        }
                       }, this.sleepDelayMs)
                     }
                   }
