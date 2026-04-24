@@ -166,7 +166,7 @@ export class REXPerplexitySpider extends REXSpider {
 
                                     let latestDate = firstWhen
 
-                                    // let firstWhenString:DateString = new DateString(result.entries[0]['entry_updated_datetime'])
+                                    let firstWhenString:DateString = new DateString(result.entries[0]['entry_updated_datetime'])
 
                                     const conversation:Conversation = {
                                       turns:[],
