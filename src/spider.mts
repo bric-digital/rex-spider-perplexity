@@ -55,7 +55,7 @@ export class REXPerplexityContentSpider extends REXContentSpider {
         return
       } else if (window.location.href.toLowerCase() === 'https://www.perplexity.ai/library') {
         console.log(`${this.name()}: Looking for links...`)
-        const urls = []
+        const urls:string[] = []
 
         window.setTimeout(() => {
           $('a').each((index, item) => {
@@ -63,7 +63,7 @@ export class REXPerplexityContentSpider extends REXContentSpider {
 
             console.log(`${this.name()}: checking ${href}...`)
 
-            if (href.startsWith('/search/')) {
+            if (href !== undefined && href.startsWith('/search/')) {
               urls.push(`https://www.perplexity.ai${href}`)
             }
           })
@@ -77,7 +77,7 @@ export class REXPerplexityContentSpider extends REXContentSpider {
 
         return
       } else if (window.location.href.toLowerCase().startsWith('https://www.perplexity.ai/search/')) {
-        const conversation = []
+        const conversation:any[] = [] // eslint-disable-line @typescript-eslint/no-explicit-any
 
         $('.group/query').each((index, item) => {
           $(item).find('.select-text').each((turnIndex, turn) => {
