@@ -201,7 +201,7 @@ export class REXPerplexitySpider extends REXSpider {
 
                                       conversation['ended'] = whenString
 
-                                      const responseMetadata = {}
+                                      const responseMetadata: Record<string, unknown> = {}
 
                                       const citations:Citation[] = []
 
@@ -530,8 +530,9 @@ chrome.declarativeNetRequest.updateSessionRules({ // updateSessionRules({
   removeRuleIds: [stripRule.id],
   addRules: [stripRule]
 }, () => {
-  if (chrome.runtime['lastError']) {
-    console.log('[rex-spider-perplexity / chrome.declarativeNetRequest] ' + chrome.runtime['lastError'].message)
+  const lastError = (chrome.runtime as { lastError?: { message?: string } }).lastError
+  if (lastError) {
+    console.log('[rex-spider-perplexity / chrome.declarativeNetRequest] ' + lastError.message)
   } else {
     console.log(`[rex-spider-perplexity] ${urlFilter} installed`)
 
