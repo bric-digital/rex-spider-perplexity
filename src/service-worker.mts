@@ -3,8 +3,12 @@ import { Conversation, Turn, DateString, Citation, Search, Result } from '@bric/
 import rexCorePlugin, { EventPayload, dispatchEvent } from '@bric/rex-core/service-worker'
 import rexSpiderPlugin, { REXSpider } from '@bric/rex-spider/service-worker'
 
+import { CrawlTarget, shouldCrawl } from './crawl-target.mjs'
+
 export class REXPerplexitySpider extends REXSpider {
   sleepDelayMs:number = 10000
+  lookbackDays:number = 30
+  maxIndexPages:number = 50
   syncing:boolean = false
   lastSync:number = 0
   syncPeriod:number = 300000
@@ -12,7 +16,7 @@ export class REXPerplexitySpider extends REXSpider {
   constructor() {
     super()
 
-    // Override sleepDelayMs from server config if provided.
+    // Override sleepDelayMs / lookbackDays / maxIndexPages from server config if provided.
     rexCorePlugin.fetchConfiguration()
       .then((config) => {
         const spiderConfig = (config as Record<string, any>)?.spider?.perplexity // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -20,8 +24,16 @@ export class REXPerplexitySpider extends REXSpider {
         if (typeof configuredDelay === 'number') {
           this.sleepDelayMs = configuredDelay
         }
+        const configuredLookback = spiderConfig?.lookback_days
+        if (typeof configuredLookback === 'number') {
+          this.lookbackDays = configuredLookback
+        }
+        const configuredMaxPages = spiderConfig?.max_index_pages
+        if (typeof configuredMaxPages === 'number') {
+          this.maxIndexPages = configuredMaxPages
+        }
       })
-      .catch((err) => console.warn('[rex-spider-perplexity] Failed to read sleep_delay_ms from config:', err))
+      .catch((err) => console.warn('[rex-spider-perplexity] Failed to read spider config:', err))
   }
 
   private dispatchCompletionEvent(crawledCount: number): void {
@@ -76,6 +88,144 @@ export class REXPerplexitySpider extends REXSpider {
     })
   }
 
+  private fetchLastUpdate(conversationId: string): Promise<number | null> {
+    return new Promise((resolve) => {
+      const key = `perplexity-${conversationId}-last-update`
+      rexCorePlugin.handleMessage({ messageType: 'fetchValue', key }, this, (response) => {
+        if (typeof response === 'number') {
+          resolve(response)
+        } else {
+          resolve(null)
+        }
+      })
+    })
+  }
+
+  private storeLastUpdate(conversationId: string, listingUpdateMs: number): Promise<void> {
+    return new Promise((resolve) => {
+      const key = `perplexity-${conversationId}-last-update`
+      rexCorePlugin.handleMessage(
+        { messageType: 'storeValue', key, value: listingUpdateMs },
+        this,
+        () => resolve()
+      )
+    })
+  }
+
+  private updateTimeMs(raw: unknown): number | null {
+    if (typeof raw === 'string') {
+      // list_ask_threads reports naive ISO-8601 (e.g. "2026-04-21T17:51:13.021534").
+      const parsed = Date.parse(raw)
+      if (!Number.isNaN(parsed)) {
+        return parsed
+      }
+    }
+    if (typeof raw === 'number') {
+      // Heuristic fallback in case Perplexity ever switches to epoch numbers:
+      // values below year-2100-in-seconds are treated as seconds, otherwise ms.
+      if (raw < 4_102_444_800) {
+        return raw * 1000
+      }
+      return raw
+    }
+    return null
+  }
+
+  private async pagingCutoff(): Promise<number> {
+    let installTime: number | null = null
+    try {
+      const response = await chrome.runtime.sendMessage({ messageType: 'getInstallTime' })
+      if (typeof response === 'number') {
+        installTime = response
+      }
+    } catch (err) {
+      console.log(`[rex-spider-perplexity] getInstallTime unavailable:`, err)
+    }
+    // Anchor the lookback window at install time so that as the study runs, the
+    // pre-study buffer stays fixed at (install - lookback_days). Conversations
+    // updated between install and now are always included. Fall back to
+    // (now - lookback_days) when install time isn't known.
+    const anchor = installTime !== null ? installTime : Date.now()
+    const cutoff = anchor - this.lookbackDays * 86_400_000
+    console.log(`[rex-spider-perplexity] Paging cutoff: ${new Date(cutoff).toISOString()} (lookbackDays=${this.lookbackDays}, installTime=${installTime})`)
+    return cutoff
+  }
+
+  private async pageIndex(cutoff: number): Promise<{ toCrawl: CrawlTarget[], firstPageFailed: boolean }> {
+    // Perplexity's library page uses list_ask_threads (POST, offset/limit in JSON body)
+    // for its infinite scroll. list_recent (used by the sidebar) does not paginate.
+    const pageSize = 20
+    const indexUrl = 'https://www.perplexity.ai/rest/thread/list_ask_threads?version=2.18&source=default'
+    const toCrawl: CrawlTarget[] = []
+
+    let offset = 0
+    let pageIndex = 0
+    let stop = false
+
+    while (!stop && pageIndex < this.maxIndexPages) {
+      console.log(`[rex-spider-perplexity] Index page ${pageIndex} (offset=${offset})`)
+
+      const response = await fetch(indexUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          limit: pageSize,
+          ascending: false,
+          offset,
+          search_term: '',
+          exclude_asi: false
+        })
+      })
+
+      if (!response.ok) {
+        console.log(`[rex-spider-perplexity] Index page ${pageIndex} failed (status ${response.status}).`)
+        if (pageIndex === 0) {
+          return { toCrawl: [], firstPageFailed: true }
+        }
+        break
+      }
+
+      const body = await response.json()
+      const items: any[] = Array.isArray(body) ? body : [] // eslint-disable-line @typescript-eslint/no-explicit-any
+
+      for (const item of items) {
+        const itemUpdateMs = this.updateTimeMs(item?.last_query_datetime)
+        if (itemUpdateMs === null) continue
+
+        if (itemUpdateMs >= cutoff) {
+          // conversationId MUST equal conversation.identifier used by the detail parser
+          // (thread_url_slug) so that the dedup key `perplexity-${id}-last-update` is the
+          // same on both the pre-fetch shouldCrawl check and the post-parse store.
+          const threadId = item?.slug
+          if (typeof threadId === 'string' && threadId.length > 0) {
+            const stored = await this.fetchLastUpdate(threadId)
+            if (!shouldCrawl(itemUpdateMs, stored)) {
+              console.log(`[rex-spider-perplexity] Skipping ${threadId} — listing update_time (${itemUpdateMs}) not newer than stored (${stored})`)
+              continue
+            }
+            const fullUrl = `https://www.perplexity.ai/rest/thread/${threadId}?with_parent_info=true&with_schematized_response=true&version=2.18&source=default&limit=10&offset=0&from_first=true&supported_block_use_cases=answer_modes&supported_block_use_cases=media_items&supported_block_use_cases=knowledge_cards&supported_block_use_cases=inline_entity_cards&supported_block_use_cases=place_widgets&supported_block_use_cases=finance_widgets&supported_block_use_cases=prediction_market_widgets&supported_block_use_cases=sports_widgets&supported_block_use_cases=flight_status_widgets&supported_block_use_cases=news_widgets&supported_block_use_cases=shopping_widgets&supported_block_use_cases=jobs_widgets&supported_block_use_cases=search_result_widgets&supported_block_use_cases=inline_images&supported_block_use_cases=inline_assets&supported_block_use_cases=placeholder_cards&supported_block_use_cases=diff_blocks&supported_block_use_cases=inline_knowledge_cards&supported_block_use_cases=entity_group_v2&supported_block_use_cases=refinement_filters&supported_block_use_cases=canvas_mode&supported_block_use_cases=maps_preview&supported_block_use_cases=answer_tabs&supported_block_use_cases=price_comparison_widgets&supported_block_use_cases=preserve_latex&supported_block_use_cases=generic_onboarding_widgets&supported_block_use_cases=in_context_suggestions`
+            if (!toCrawl.some((t) => t.conversationId === threadId)) {
+              toCrawl.push({ url: fullUrl, listingUpdateMs: itemUpdateMs, conversationId: threadId })
+            }
+          }
+        } else {
+          // Items are newest-first (ascending:false), so the first below-cutoff item terminates the walk.
+          stop = true
+          break
+        }
+      }
+
+      if (items.length < pageSize) break
+      offset += pageSize
+      pageIndex += 1
+      if (!stop && pageIndex < this.maxIndexPages) {
+        await new Promise((r) => self.setTimeout(r, this.sleepDelayMs))
+      }
+    }
+
+    return { toCrawl, firstPageFailed: false }
+  }
+
   checkNeedsUpdate(): Promise<boolean> {
     console.log(`[rex-spider-perplexity] checkNeedsUpdate`)
 
@@ -116,53 +266,38 @@ export class REXPerplexitySpider extends REXSpider {
         rexCorePlugin.handleMessage(storeMessage, this, (response) => { // eslint-disable-line @typescript-eslint/no-unused-vars
           this.syncing = true
 
-          const indexUrl = 'https://www.perplexity.ai/rest/thread/list_recent?version=2.18&source=default'
+          this.pagingCutoff()
+            .then((cutoff) => this.pageIndex(cutoff))
+            .then(({ toCrawl, firstPageFailed }) => {
+              if (firstPageFailed) {
+                console.log(`[rex-spider-perplexity] First index page failed; falling back to DOM scraping.`)
+                this.syncing = false
+                this.dispatchCompletionEvent(0)
+                resolve(true) // Error - fall back to DOM scraping...
+                return
+              }
 
-          fetch(indexUrl)
-            .then((response: Response) => {
-              if (response.ok) {
-                const toCrawl:string[] = []
+              let crawledCount = 0
 
-                let crawledCount = 0
+              console.log(`[rex-spider-perplexity] Crawl list (${toCrawl.length} threads):`)
+              console.log(toCrawl)
 
-                response.json().then((perplexityList) => {
-                  console.log(`[rex-spider-perplexity] Index content:`)
-                  console.log(perplexityList)
-
-                  for (const convo of perplexityList) {
-                    if (convo.link !== undefined) {
-                      const tokens = convo.link.split('/')
-
-                      if (tokens[1] === 'search') {
-                        const fullUrl = `https://www.perplexity.ai/rest/thread/${tokens[2]}?with_parent_info=true&with_schematized_response=true&version=2.18&source=default&limit=10&offset=0&from_first=true&supported_block_use_cases=answer_modes&supported_block_use_cases=media_items&supported_block_use_cases=knowledge_cards&supported_block_use_cases=inline_entity_cards&supported_block_use_cases=place_widgets&supported_block_use_cases=finance_widgets&supported_block_use_cases=prediction_market_widgets&supported_block_use_cases=sports_widgets&supported_block_use_cases=flight_status_widgets&supported_block_use_cases=news_widgets&supported_block_use_cases=shopping_widgets&supported_block_use_cases=jobs_widgets&supported_block_use_cases=search_result_widgets&supported_block_use_cases=inline_images&supported_block_use_cases=inline_assets&supported_block_use_cases=placeholder_cards&supported_block_use_cases=diff_blocks&supported_block_use_cases=inline_knowledge_cards&supported_block_use_cases=entity_group_v2&supported_block_use_cases=refinement_filters&supported_block_use_cases=canvas_mode&supported_block_use_cases=maps_preview&supported_block_use_cases=answer_tabs&supported_block_use_cases=price_comparison_widgets&supported_block_use_cases=preserve_latex&supported_block_use_cases=generic_onboarding_widgets&supported_block_use_cases=in_context_suggestions`
-
-                        if (toCrawl.includes(fullUrl) === false) {
-                          toCrawl.push(fullUrl)
-                        }
-                      }
-                    }
-                  }
-
-                  console.log(`[rex-spider-perplexity] Crawl list:`)
-                  console.log(toCrawl)
-
-                  const fetchConvo = () => {
+              const fetchConvo = () => {
                     if (toCrawl.length == 0) {
                       this.dispatchCompletionEvent(crawledCount)
                       resolve(false)
                     } else {
                       self.setTimeout(() => {
-                        const nextUrl = toCrawl.shift()
+                        const next = toCrawl.shift()!
 
-                        console.log(`[rex-spider-perplexity] Crawl: ${nextUrl}`)
+                        console.log(`[rex-spider-perplexity] Crawl: ${next.url}`)
 
-                        if (nextUrl !== undefined) {
-                          fetch(nextUrl)
-                            .then((convoResponse: Response) => {
-                              if (convoResponse.ok) {
-                                convoResponse.json().then((result) => {
-                                  if (result.status === 'success') {
-                                    let firstWhen = new Date(result.entries[0]['entry_updated_datetime'])
+                        fetch(next.url)
+                          .then((convoResponse: Response) => {
+                            if (convoResponse.ok) {
+                              convoResponse.json().then((result) => {
+                                if (result.status === 'success') {
+                                  let firstWhen = new Date(result.entries[0]['entry_updated_datetime'])
 
                                     let latestDate = firstWhen
 
@@ -439,35 +574,29 @@ export class REXPerplexitySpider extends REXSpider {
                                         })
                                       }
 
-                                      fetchConvo()
-                                    })
-                                  } else {
-                                    console.log(`[rex-spider-perplexity] Crawl failed ${nextUrl}. Content:`)
-                                    console.log(convoResponse)
+                                    fetchConvo()
+                                  })
+                                } else {
+                                  console.log(`[rex-spider-perplexity] Crawl failed ${next.url}. Content:`)
+                                  console.log(convoResponse)
 
-                                    this.dispatchCompletionEvent(crawledCount)
-                                    resolve(true) // Error - fall back to DOM scraping...
-                                  }
-                                })
-                              } else {
-                                console.log(`[rex-spider-perplexity] Crawl failed ${nextUrl}. Response:`)
-                                console.log(convoResponse)
+                                  this.dispatchCompletionEvent(crawledCount)
+                                  resolve(true) // Error - fall back to DOM scraping...
+                                }
+                              })
+                            } else {
+                              console.log(`[rex-spider-perplexity] Crawl failed ${next.url}. Response:`)
+                              console.log(convoResponse)
 
-                                this.dispatchCompletionEvent(crawledCount)
-                                resolve(true) // Error - fall back to DOM scraping...
-                              }
-                            })
-                        }
+                              this.dispatchCompletionEvent(crawledCount)
+                              resolve(true) // Error - fall back to DOM scraping...
+                            }
+                          })
                       }, this.sleepDelayMs)
                     }
                   }
 
-                  fetchConvo()
-                })
-              } else {
-                this.dispatchCompletionEvent(0)
-                resolve(true) // Error - fall back to DOM scraping...
-              }
+              fetchConvo()
             })
             .catch((err) => {
               console.log(`[rex-spider-perplexity] Unexpected error during sync:`, err)
