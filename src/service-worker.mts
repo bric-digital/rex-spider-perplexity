@@ -284,6 +284,7 @@ export class REXPerplexitySpider extends REXSpider {
 
               const fetchConvo = () => {
                     if (toCrawl.length == 0) {
+                      this.syncing = false
                       this.dispatchCompletionEvent(crawledCount)
                       resolve(false)
                     } else {
@@ -580,6 +581,7 @@ export class REXPerplexitySpider extends REXSpider {
                                   console.log(`[rex-spider-perplexity] Crawl failed ${next.url}. Content:`)
                                   console.log(convoResponse)
 
+                                  this.syncing = false
                                   this.dispatchCompletionEvent(crawledCount)
                                   resolve(true) // Error - fall back to DOM scraping...
                                 }
@@ -588,6 +590,7 @@ export class REXPerplexitySpider extends REXSpider {
                               console.log(`[rex-spider-perplexity] Crawl failed ${next.url}. Response:`)
                               console.log(convoResponse)
 
+                              this.syncing = false
                               this.dispatchCompletionEvent(crawledCount)
                               resolve(true) // Error - fall back to DOM scraping...
                             }
