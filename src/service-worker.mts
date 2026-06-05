@@ -226,9 +226,9 @@ export class REXPerplexitySpider extends REXSpider {
     return { toCrawl, firstPageFailed: false }
   }
 
-  parseConversation(conversationJson: any): Promise<any | null> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  parseConversation(conversationJson: any): Promise<any | null> { // eslint-disable-line @typescript-eslint/no-explicit-any, 
     return new Promise((resolve) => {
-      console.log(`TODO: Need to bring conversation parsing logic here.`)
+      console.log(`TODO: Need to bring conversation parsing logic here: ${conversationJson}.`)
 
       resolve(null)
     })
@@ -307,7 +307,7 @@ export class REXPerplexitySpider extends REXSpider {
                               convoResponse.json().then((result) => {
                                 if (result.status === 'success') {
                                   // TODO: Move the logic below to parseConversation
-                                  
+
                                   let firstWhen = new Date(result.entries[0]['entry_updated_datetime'])
 
                                     let latestDate = firstWhen
