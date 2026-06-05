@@ -1,0 +1,10 @@
+{
+    "configuration_url": "config.json",
+    "identifier": "rex-spider-perplexity-test",
+    },
+    "ui": [{
+        "title": "REX Spider: Perplexity Testing Extension",
+        "identifier": "main",
+        "default": true
+    }]
+}
