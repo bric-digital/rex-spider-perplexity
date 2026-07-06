@@ -36,7 +36,7 @@ export class REXPerplexitySpider extends REXSpider {
       .catch((err) => console.warn('[rex-spider-perplexity] Failed to read spider config:', err))
   }
 
-  private dispatchCompletionEvent(crawledCount: number): void {
+  private dispatchCompletionEvent(crawledCount: number, accountCompleteReason: 'date-floor' | 'exhausted' | null = null): void {
     // Delay mirrors the rex-history completion pattern: waits for PDK's
     // persist debounce to expire so queued events flush before the signal.
     setTimeout(() => {
@@ -48,6 +48,17 @@ export class REXPerplexitySpider extends REXSpider {
           date: Date.now()
         }
       })
+
+      // Account-complete only accompanies runs that enumerated the full
+      // account (index paging ended at the cutoff or ran out of items, and
+      // every queued thread was captured) — unlike the per-run event above,
+      // which fires on every exit path including errors and skips.
+      if (accountCompleteReason !== null) {
+        this.signalAccountComplete({
+          reason: accountCompleteReason,
+          crawled_count: crawledCount
+        })
+      }
     }, 1100)
   }
 
@@ -151,7 +162,7 @@ export class REXPerplexitySpider extends REXSpider {
     return cutoff
   }
 
-  private async pageIndex(cutoff: number): Promise<{ toCrawl: CrawlTarget[], firstPageFailed: boolean }> {
+  private async pageIndex(cutoff: number): Promise<{ toCrawl: CrawlTarget[], firstPageFailed: boolean, endReason: 'date-floor' | 'exhausted' | null }> {
     // Perplexity's library page uses list_ask_threads (POST, offset/limit in JSON body)
     // for its infinite scroll. list_recent (used by the sidebar) does not paginate.
     const pageSize = 20
@@ -161,6 +172,12 @@ export class REXPerplexitySpider extends REXSpider {
     let offset = 0
     let pageIndex = 0
     let stop = false
+
+    // Why paging ended: 'date-floor' (crossed the cutoff) or 'exhausted'
+    // (no more items) both mean the whole account was enumerated. null means
+    // it ended early — maxIndexPages cap or a failed page — so completion of
+    // this run does NOT imply the account is fully collected.
+    let endReason: 'date-floor' | 'exhausted' | null = null
 
     while (!stop && pageIndex < this.maxIndexPages) {
       console.log(`[rex-spider-perplexity] Index page ${pageIndex} (offset=${offset})`)
@@ -180,7 +197,7 @@ export class REXPerplexitySpider extends REXSpider {
       if (!response.ok) {
         console.log(`[rex-spider-perplexity] Index page ${pageIndex} failed (status ${response.status}).`)
         if (pageIndex === 0) {
-          return { toCrawl: [], firstPageFailed: true }
+          return { toCrawl: [], firstPageFailed: true, endReason: null }
         }
         break
       }
@@ -211,11 +228,17 @@ export class REXPerplexitySpider extends REXSpider {
         } else {
           // Items are newest-first (ascending:false), so the first below-cutoff item terminates the walk.
           stop = true
+          endReason = 'date-floor'
           break
         }
       }
 
-      if (items.length < pageSize) break
+      if (items.length < pageSize) {
+        if (endReason === null) {
+          endReason = 'exhausted'
+        }
+        break
+      }
       offset += pageSize
       pageIndex += 1
       if (!stop && pageIndex < this.maxIndexPages) {
@@ -223,7 +246,7 @@ export class REXPerplexitySpider extends REXSpider {
       }
     }
 
-    return { toCrawl, firstPageFailed: false }
+    return { toCrawl, firstPageFailed: false, endReason }
   }
 
   parseConversation(conversationJson: any): Promise<any | null> { // eslint-disable-line @typescript-eslint/no-explicit-any, 
@@ -276,7 +299,7 @@ export class REXPerplexitySpider extends REXSpider {
 
           this.pagingCutoff()
             .then((cutoff) => this.pageIndex(cutoff))
-            .then(({ toCrawl, firstPageFailed }) => {
+            .then(({ toCrawl, firstPageFailed, endReason }) => {
               if (firstPageFailed) {
                 console.log(`[rex-spider-perplexity] First index page failed; falling back to DOM scraping.`)
                 this.syncing = false
@@ -293,7 +316,7 @@ export class REXPerplexitySpider extends REXSpider {
               const fetchConvo = () => {
                     if (toCrawl.length == 0) {
                       this.syncing = false
-                      this.dispatchCompletionEvent(crawledCount)
+                      this.dispatchCompletionEvent(crawledCount, endReason)
                       resolve(false)
                     } else {
                       self.setTimeout(() => {
