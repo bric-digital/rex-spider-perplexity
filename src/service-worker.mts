@@ -12,6 +12,10 @@ export class REXPerplexitySpider extends REXSpider {
   syncing:boolean = false
   lastSync:number = 0
   syncPeriod:number = 300000
+  // Guards dispatchCompletionEvent against double-fire from the watchdog
+  // racing a natural-path terminal branch. Reset at the top of each
+  // checkNeedsUpdate run.
+  private completed:boolean = false
 
   constructor() {
     super()
@@ -37,6 +41,8 @@ export class REXPerplexitySpider extends REXSpider {
   }
 
   private dispatchCompletionEvent(crawledCount: number, accountCompleteReason: 'date-floor' | 'exhausted' | null = null): void {
+    if (this.completed) return
+    this.completed = true
     // Delay mirrors the rex-history completion pattern: waits for PDK's
     // persist debounce to expire so queued events flush before the signal.
     setTimeout(() => {
@@ -205,6 +211,10 @@ export class REXPerplexitySpider extends REXSpider {
       const body = await response.json()
       const items: any[] = Array.isArray(body) ? body : [] // eslint-disable-line @typescript-eslint/no-explicit-any
 
+      // Each fetched index page is progress: long paging phases (dozens of
+      // pages x sleep_delay_ms) must not trip the stuck-run watchdog.
+      this.noteProgress()
+
       for (const item of items) {
         const itemUpdateMs = this.updateTimeMs(item?.last_query_datetime)
         if (itemUpdateMs === null) continue
@@ -261,6 +271,11 @@ export class REXPerplexitySpider extends REXSpider {
     console.log(`[rex-spider-perplexity] checkNeedsUpdate`)
 
     return new Promise<boolean>((resolve) => {
+      // Reset completion-idempotency flag at the top of every entry so the
+      // "too soon to sync" short-circuit and full runs can each fire exactly
+      // one *-complete event for that round.
+      this.completed = false
+
       if (this.syncing) {
         console.log(`[rex-spider-perplexity] Still syncing. Skipping this round...`)
         resolve(true)
@@ -297,12 +312,25 @@ export class REXPerplexitySpider extends REXSpider {
         rexCorePlugin.handleMessage(storeMessage, this, (response) => { // eslint-disable-line @typescript-eslint/no-unused-vars
           this.syncing = true
 
+          // Arm the rex-spider watchdog. If the run wedges (hung fetch,
+          // parser exception that escapes the catch chain, etc.), the
+          // watchdog runs onTimeout below to clear `syncing`, dispatch
+          // *-complete, and let offboarding proceed. The completed flag
+          // on dispatchCompletionEvent prevents a double-fire if a
+          // delayed natural-path branch later runs to completion.
+          this.beginRun(() => {
+            this.syncing = false
+            this.dispatchCompletionEvent(0) // crawled count unknown from here
+            resolve(true)
+          })
+
           this.pagingCutoff()
             .then((cutoff) => this.pageIndex(cutoff))
             .then(({ toCrawl, firstPageFailed, endReason }) => {
               if (firstPageFailed) {
                 console.log(`[rex-spider-perplexity] First index page failed; falling back to DOM scraping.`)
                 this.syncing = false
+                this.endRun()
                 this.dispatchCompletionEvent(0)
                 resolve(true) // Error - fall back to DOM scraping...
                 return
@@ -316,6 +344,7 @@ export class REXPerplexitySpider extends REXSpider {
               const fetchConvo = () => {
                     if (toCrawl.length == 0) {
                       this.syncing = false
+                      this.endRun()
                       this.dispatchCompletionEvent(crawledCount, endReason)
                       resolve(false)
                     } else {
@@ -596,6 +625,7 @@ export class REXPerplexitySpider extends REXSpider {
 
                                         dispatchEvent(payload)
                                         crawledCount += 1
+                                        this.noteProgress()
 
                                         const storeMessage = {
                                           messageType: 'storeValue',
@@ -615,6 +645,7 @@ export class REXPerplexitySpider extends REXSpider {
                                   console.log(convoResponse)
 
                                   this.syncing = false
+                                  this.endRun()
                                   this.dispatchCompletionEvent(crawledCount)
                                   resolve(true) // Error - fall back to DOM scraping...
                                 }
@@ -624,6 +655,7 @@ export class REXPerplexitySpider extends REXSpider {
                               console.log(convoResponse)
 
                               this.syncing = false
+                              this.endRun()
                               this.dispatchCompletionEvent(crawledCount)
                               resolve(true) // Error - fall back to DOM scraping...
                             }
@@ -637,6 +669,7 @@ export class REXPerplexitySpider extends REXSpider {
             .catch((err) => {
               console.log(`[rex-spider-perplexity] Unexpected error during sync:`, err)
               this.syncing = false
+              this.endRun()
               this.dispatchCompletionEvent(0)
               resolve(true) // Error - fall back to DOM scraping...
             })
