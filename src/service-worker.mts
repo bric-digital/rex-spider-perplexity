@@ -282,8 +282,8 @@ export class REXPerplexitySpider extends REXSpider {
     })
   }
 
-  checkNeedsUpdate(): Promise<boolean> {
-    console.log(`[rex-spider-perplexity] checkNeedsUpdate`)
+  checkNeedsUpdate(force: boolean = false): Promise<boolean> {
+    console.log(`[rex-spider-perplexity] checkNeedsUpdate (force=${force})`)
 
     return new Promise<boolean>((resolve) => {
       // Reset completion-idempotency flag at the top of every entry so the
@@ -310,7 +310,7 @@ export class REXPerplexitySpider extends REXSpider {
           timestamp = response
         }
 
-        if (Date.now() < timestamp + this.syncPeriod) {
+        if (!force && Date.now() < timestamp + this.syncPeriod) {
           console.log(`[rex-spider-perplexity] Too soon to sync again. Skipping this round...`)
           this.dispatchCompletionEvent(0)
           resolve(true)
