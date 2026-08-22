@@ -3,9 +3,26 @@
 // Implements the necessary functionality to load the REX modules into the 
 // extension background service worker context.
 
-import rexCorePlugin from '@bric/rex-core/service-worker'
+import rexCorePlugin, { REXServiceWorkerModule, registerREXModule } from '@bric/rex-core/service-worker'
 import rexSpiderPlugin from '@bric/rex-spider/service-worker'
 import rexSpiderPerplexityPlugin from '@bric/rex-spider-perplexity/service-worker'
+
+// Captures every dispatched event through the public module contract so specs
+// can assert on what was dispatched without reaching into rex-core internals.
+class EventCaptureModule extends REXServiceWorkerModule {
+  moduleName () {
+    return 'TestEventCapture'
+  }
+
+  setup () { }
+
+  logEvent (event) {
+    self['__dispatchedEvents'] = self['__dispatchedEvents'] || []
+    self['__dispatchedEvents'].push(event)
+  }
+}
+
+registerREXModule(new EventCaptureModule())
 
 console.log(`Imported ${rexCorePlugin} into service worker context...`)
 console.log(`Imported ${rexSpiderPlugin} into service worker context...`)

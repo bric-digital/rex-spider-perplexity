@@ -21,6 +21,67 @@ export class REXPerplexitySpider extends REXSpider {
   // checkNeedsUpdate run.
   private completed:boolean = false
 
+  // Perplexity requires an x-pplx-account header naming the account UUID on
+  // thread endpoints (observed 2026-08-22); cookie-only requests behave as an
+  // account-less session whose thread list is empty. In-memory only, so a
+  // restarted worker re-acquires it.
+  accountId: string | null = null
+
+  private scanForAccountId(text: string): string | null {
+    const match = text.match(/"account_uuid"\s*:\s*"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/)
+
+    if (match !== null) {
+      return match[1]
+    }
+
+    return null
+  }
+
+  private fetchAccountId(): Promise<string | null> {
+    if (this.accountId !== null) {
+      return Promise.resolve(this.accountId)
+    }
+
+    const probeUrls = [
+      'https://www.perplexity.ai/api/auth/session',
+      'https://www.perplexity.ai/'
+    ]
+
+    const probe = (index: number): Promise<string | null> => {
+      if (index >= probeUrls.length) {
+        return Promise.resolve(null)
+      }
+
+      return fetch(probeUrls[index])
+        .then((response) => response.ok ? response.text() : '')
+        .then((body) => {
+          const found = this.scanForAccountId(body)
+
+          if (found !== null) {
+            return found
+          }
+
+          return probe(index + 1)
+        })
+        .catch(() => probe(index + 1))
+    }
+
+    return probe(0)
+      .then((accountId) => {
+        this.accountId = accountId
+
+        return accountId
+      })
+  }
+
+  private accountHeaders(): Record<string, string> {
+    if (this.accountId === null) {
+      return {}
+    }
+
+    return { 'x-pplx-account': this.accountId }
+  }
+
   constructor() {
     super()
 
@@ -100,24 +161,13 @@ export class REXPerplexitySpider extends REXSpider {
   }
 
   checkLogin(): Promise<boolean> {
-    return new Promise<boolean>((resolve) => {
-      const indexUrl = 'https://www.perplexity.ai/rest/thread/list_recent?version=2.18&source=default'
+    const indexUrl = 'https://www.perplexity.ai/rest/thread/list_recent?version=2.18&source=default'
 
-      fetch(indexUrl)
-        .then((response: Response) => {
-          if (response.ok) {
-            response.json().then((perplexityList) => {
-              if (perplexityList.length > 0) {
-                resolve(true)
-              } else {
-                resolve(false)
-              }
-            })
-          } else {
-            resolve(false)
-          }
-        })
-    })
+    return this.fetchAccountId()
+      .then(() => fetch(indexUrl, { headers: this.accountHeaders() }))
+      .then((response: Response) => response.ok ? response.json() : [])
+      .then((perplexityList) => Array.isArray(perplexityList) && perplexityList.length > 0)
+      .catch(() => false)
   }
 
   private fetchLastUpdate(conversationId: string): Promise<number | null> {
@@ -205,7 +255,7 @@ export class REXPerplexitySpider extends REXSpider {
 
       const response = await fetch(indexUrl, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...this.accountHeaders() },
         body: JSON.stringify({
           limit: pageSize,
           ascending: false,
@@ -341,7 +391,8 @@ export class REXPerplexitySpider extends REXSpider {
             resolve(true)
           })
 
-          this.pagingCutoff()
+          this.fetchAccountId()
+            .then(() => this.pagingCutoff())
             .then((cutoff) => this.pageIndex(cutoff))
             .then(({ toCrawl, firstPageFailed, endReason }) => {
               if (firstPageFailed) {
@@ -355,6 +406,11 @@ export class REXPerplexitySpider extends REXSpider {
 
               let crawledCount = 0
 
+              // Without an account id the API answers as an account-less
+              // session whose index is empty, so an empty result says nothing
+              // about the account; never let such a run read as complete.
+              const confirmedEndReason = this.accountId !== null ? endReason : null
+
               console.log(`[rex-spider-perplexity] Crawl list (${toCrawl.length} threads):`)
               console.log(toCrawl)
 
@@ -362,7 +418,7 @@ export class REXPerplexitySpider extends REXSpider {
                     if (toCrawl.length == 0) {
                       this.syncing = false
                       this.endRun()
-                      this.dispatchCompletionEvent(crawledCount, endReason)
+                      this.dispatchCompletionEvent(crawledCount, confirmedEndReason)
                       resolve(false)
                     } else {
                       self.setTimeout(() => {
@@ -370,7 +426,7 @@ export class REXPerplexitySpider extends REXSpider {
 
                         console.log(`[rex-spider-perplexity] Crawl: ${next.url}`)
 
-                        fetch(next.url)
+                        fetch(next.url, { headers: this.accountHeaders() })
                           .then((convoResponse: Response) => {
                             if (convoResponse.ok) {
                               convoResponse.json().then((result) => {

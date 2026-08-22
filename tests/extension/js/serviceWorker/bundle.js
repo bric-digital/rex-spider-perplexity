@@ -6,7 +6,11 @@ var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __commonJS = (cb, mod) => function __require() {
-  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  try {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  } catch (e) {
+    throw mod = 0, e;
+  }
 };
 var __copyProps = (to2, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
@@ -728,6 +732,11 @@ var rexCorePlugin = {
     console.log(`[rex-core] Running setup...`);
     globalThis.chrome.runtime.onInstalled.addListener(function(details) {
       console.log(`[rex-core] chrome.runtime.onInstalled.addListener`);
+      globalThis.chrome.storage.local.get("rexInstallTime").then((response) => {
+        if (response.rexInstallTime === void 0) {
+          globalThis.chrome.storage.local.set({ rexInstallTime: Date.now() });
+        }
+      });
       rexCorePlugin.openExtensionWindow();
     });
     globalThis.chrome.action.onClicked.addListener(function(tab) {
@@ -841,6 +850,12 @@ var rexCorePlugin = {
       globalThis.chrome.storage.local.get("rexIdentifier").then((response) => {
         const idResponse = response;
         sendResponse(idResponse.rexIdentifier);
+      });
+      return true;
+    }
+    if (message.messageType == "getInstallTime") {
+      globalThis.chrome.storage.local.get("rexInstallTime").then((response) => {
+        sendResponse(response.rexInstallTime ?? null);
       });
       return true;
     }
@@ -6600,6 +6615,19 @@ var REXPerplexitySpider = class extends REXSpider {
     this.syncing = false;
     this.lastSync = 0;
     this.syncPeriod = 3e5;
+    // Whether routine per-run *-complete events are emitted (config
+    // spider.perplexity.emit_run_complete). Watchdog-recovered completions are
+    // always emitted regardless.
+    this.emitRunComplete = true;
+    // Guards dispatchCompletionEvent against double-fire from the watchdog
+    // racing a natural-path terminal branch. Reset at the top of each
+    // checkNeedsUpdate run.
+    this.completed = false;
+    // Perplexity requires an x-pplx-account header naming the account UUID on
+    // thread endpoints (observed 2026-08-22); cookie-only requests behave as an
+    // account-less session whose thread list is empty. In-memory only, so a
+    // restarted worker re-acquires it.
+    this.accountId = null;
     service_worker_default.fetchConfiguration().then((config) => {
       const spiderConfig = config?.spider?.perplexity;
       const configuredDelay = spiderConfig?.sleep_delay_ms;
@@ -6614,18 +6642,65 @@ var REXPerplexitySpider = class extends REXSpider {
       if (typeof configuredMaxPages === "number") {
         this.maxIndexPages = configuredMaxPages;
       }
+      const configuredEmitRunComplete = spiderConfig?.emit_run_complete;
+      if (typeof configuredEmitRunComplete === "boolean") {
+        this.emitRunComplete = configuredEmitRunComplete;
+      }
     }).catch((err) => console.warn("[rex-spider-perplexity] Failed to read spider config:", err));
   }
-  dispatchCompletionEvent(crawledCount, accountCompleteReason = null) {
-    setTimeout(() => {
-      dispatchEvent({
-        name: "pdk-app-event",
-        event_name: "rex-spider-perplexity-complete",
-        event_details: {
-          crawled_count: crawledCount,
-          date: Date.now()
+  scanForAccountId(text) {
+    const match = text.match(/"account_uuid"\s*:\s*"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/);
+    if (match !== null) {
+      return match[1];
+    }
+    return null;
+  }
+  fetchAccountId() {
+    if (this.accountId !== null) {
+      return Promise.resolve(this.accountId);
+    }
+    const probeUrls = [
+      "https://www.perplexity.ai/api/auth/session",
+      "https://www.perplexity.ai/"
+    ];
+    const probe = (index) => {
+      if (index >= probeUrls.length) {
+        return Promise.resolve(null);
+      }
+      return fetch(probeUrls[index]).then((response) => response.ok ? response.text() : "").then((body) => {
+        const found = this.scanForAccountId(body);
+        if (found !== null) {
+          return found;
         }
-      });
+        return probe(index + 1);
+      }).catch(() => probe(index + 1));
+    };
+    return probe(0).then((accountId) => {
+      this.accountId = accountId;
+      return accountId;
+    });
+  }
+  accountHeaders() {
+    if (this.accountId === null) {
+      return {};
+    }
+    return { "x-pplx-account": this.accountId };
+  }
+  dispatchCompletionEvent(crawledCount, accountCompleteReason = null, recovered = false) {
+    if (this.completed) return;
+    this.completed = true;
+    setTimeout(() => {
+      if (recovered || this.emitRunComplete) {
+        dispatchEvent({
+          name: "pdk-app-event",
+          event_name: "rex-spider-perplexity-complete",
+          event_details: {
+            crawled_count: crawledCount,
+            date: Date.now(),
+            ...recovered ? { recovered_via: "watchdog" } : {}
+          }
+        });
+      }
       if (accountCompleteReason !== null) {
         this.signalAccountComplete({
           reason: accountCompleteReason,
@@ -6647,22 +6722,8 @@ var REXPerplexitySpider = class extends REXSpider {
     return ["https://www.perplexity.ai/library/"];
   }
   checkLogin() {
-    return new Promise((resolve) => {
-      const indexUrl = "https://www.perplexity.ai/rest/thread/list_recent?version=2.18&source=default";
-      fetch(indexUrl).then((response) => {
-        if (response.ok) {
-          response.json().then((perplexityList) => {
-            if (perplexityList.length > 0) {
-              resolve(true);
-            } else {
-              resolve(false);
-            }
-          });
-        } else {
-          resolve(false);
-        }
-      });
-    });
+    const indexUrl = "https://www.perplexity.ai/rest/thread/list_recent?version=2.18&source=default";
+    return this.fetchAccountId().then(() => fetch(indexUrl, { headers: this.accountHeaders() })).then((response) => response.ok ? response.json() : []).then((perplexityList) => Array.isArray(perplexityList) && perplexityList.length > 0).catch(() => false);
   }
   fetchLastUpdate(conversationId) {
     return new Promise((resolve) => {
@@ -6728,7 +6789,7 @@ var REXPerplexitySpider = class extends REXSpider {
       console.log(`[rex-spider-perplexity] Index page ${pageIndex} (offset=${offset})`);
       const response = await fetch(indexUrl, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...this.accountHeaders() },
         body: JSON.stringify({
           limit: pageSize,
           ascending: false,
@@ -6746,6 +6807,7 @@ var REXPerplexitySpider = class extends REXSpider {
       }
       const body = await response.json();
       const items = Array.isArray(body) ? body : [];
+      this.noteProgress();
       for (const item of items) {
         const itemUpdateMs = this.updateTimeMs(item?.last_query_datetime);
         if (itemUpdateMs === null) continue;
@@ -6791,6 +6853,7 @@ var REXPerplexitySpider = class extends REXSpider {
   checkNeedsUpdate() {
     console.log(`[rex-spider-perplexity] checkNeedsUpdate`);
     return new Promise((resolve) => {
+      this.completed = false;
       if (this.syncing) {
         console.log(`[rex-spider-perplexity] Still syncing. Skipping this round...`);
         resolve(true);
@@ -6818,27 +6881,35 @@ var REXPerplexitySpider = class extends REXSpider {
         };
         service_worker_default.handleMessage(storeMessage, this, (response2) => {
           this.syncing = true;
-          this.pagingCutoff().then((cutoff) => this.pageIndex(cutoff)).then(({ toCrawl, firstPageFailed, endReason }) => {
+          this.beginRun(() => {
+            this.syncing = false;
+            this.dispatchCompletionEvent(0, null, true);
+            resolve(true);
+          });
+          this.fetchAccountId().then(() => this.pagingCutoff()).then((cutoff) => this.pageIndex(cutoff)).then(({ toCrawl, firstPageFailed, endReason }) => {
             if (firstPageFailed) {
               console.log(`[rex-spider-perplexity] First index page failed; falling back to DOM scraping.`);
               this.syncing = false;
+              this.endRun();
               this.dispatchCompletionEvent(0);
               resolve(true);
               return;
             }
             let crawledCount = 0;
+            const confirmedEndReason = this.accountId !== null ? endReason : null;
             console.log(`[rex-spider-perplexity] Crawl list (${toCrawl.length} threads):`);
             console.log(toCrawl);
             const fetchConvo = () => {
               if (toCrawl.length == 0) {
                 this.syncing = false;
-                this.dispatchCompletionEvent(crawledCount, endReason);
+                this.endRun();
+                this.dispatchCompletionEvent(crawledCount, confirmedEndReason);
                 resolve(false);
               } else {
                 self.setTimeout(() => {
                   const next = toCrawl.shift();
                   console.log(`[rex-spider-perplexity] Crawl: ${next.url}`);
-                  fetch(next.url).then((convoResponse) => {
+                  fetch(next.url, { headers: this.accountHeaders() }).then((convoResponse) => {
                     if (convoResponse.ok) {
                       convoResponse.json().then((result) => {
                         if (result.status === "success") {
@@ -7045,6 +7116,7 @@ var REXPerplexitySpider = class extends REXSpider {
                               console.log(payload);
                               dispatchEvent(payload);
                               crawledCount += 1;
+                              this.noteProgress();
                               const storeMessage2 = {
                                 messageType: "storeValue",
                                 key: lastUpdateKey,
@@ -7060,6 +7132,7 @@ var REXPerplexitySpider = class extends REXSpider {
                           console.log(`[rex-spider-perplexity] Crawl failed ${next.url}. Content:`);
                           console.log(convoResponse);
                           this.syncing = false;
+                          this.endRun();
                           this.dispatchCompletionEvent(crawledCount);
                           resolve(true);
                         }
@@ -7068,6 +7141,7 @@ var REXPerplexitySpider = class extends REXSpider {
                       console.log(`[rex-spider-perplexity] Crawl failed ${next.url}. Response:`);
                       console.log(convoResponse);
                       this.syncing = false;
+                      this.endRun();
                       this.dispatchCompletionEvent(crawledCount);
                       resolve(true);
                     }
@@ -7079,6 +7153,7 @@ var REXPerplexitySpider = class extends REXSpider {
           }).catch((err) => {
             console.log(`[rex-spider-perplexity] Unexpected error during sync:`, err);
             this.syncing = false;
+            this.endRun();
             this.dispatchCompletionEvent(0);
             resolve(true);
           });
@@ -7149,6 +7224,18 @@ service_worker_default2.registerSpider(perplexitySpider);
 var service_worker_default3 = perplexitySpider;
 
 // tests/src/service-worker.ts
+var EventCaptureModule = class extends REXServiceWorkerModule {
+  moduleName() {
+    return "TestEventCapture";
+  }
+  setup() {
+  }
+  logEvent(event) {
+    self["__dispatchedEvents"] = self["__dispatchedEvents"] || [];
+    self["__dispatchedEvents"].push(event);
+  }
+};
+registerREXModule(new EventCaptureModule());
 console.log(`Imported ${service_worker_default} into service worker context...`);
 console.log(`Imported ${service_worker_default2} into service worker context...`);
 console.log(`Imported ${service_worker_default3} into service worker context...`);
