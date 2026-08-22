@@ -9,8 +9,10 @@ const startupDelay = 2500
 // Real values captured from a live migrated account on 2026-08-22. Perplexity
 // now requires an x-pplx-account header on thread endpoints; requests without
 // it see an empty account (list endpoints return [], detail returns
-// VIEW_THREAD_NOT_ALLOWED). Slug and uuid are the same string on Sessions
-// threads.
+// VIEW_THREAD_NOT_ALLOWED). The account UUID lives only in the page's
+// localStorage (pplx-last-active-account), so the browser-context module
+// relays it to the service worker, which persists it through rex-core.
+// Slug and uuid are the same string on Sessions threads.
 const ACCOUNT_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
 const THREAD_SLUG = '068e2f71-dc5c-4b4f-b3ef-4906bd8d73f0'
 const THREAD_UPDATED = '2026-08-22T13:15:18.730943'
@@ -44,11 +46,9 @@ const detailResponse = {
   }]
 }
 
-// Installs a fetch stub inside the service worker. The account id is offered
-// through every acquisition channel the implementation might use (response
-// header echo, homepage HTML, session endpoint) when cfg.accountAvailable is
-// true, and through none of them when false. Assertions pin the outcome
-// (thread requests carry the header), not the acquisition mechanism.
+// Installs a fetch stub inside the service worker, mirroring the live API's
+// observed behavior: requests carrying x-pplx-account see the account's
+// threads, requests without it see an empty account (not an error).
 const installFetchStub = (cfg) => {
   self['__requests'] = []
   self['__dispatchedEvents'] = []
@@ -59,25 +59,20 @@ const installFetchStub = (cfg) => {
 
     self['__requests'].push({ url, method: (init && init.method) || 'GET', headers })
 
-    const jsonResponse = (body, extraHeaders) => new Response(JSON.stringify(body), {
+    const jsonResponse = (body) => new Response(JSON.stringify(body), {
       status: 200,
-      headers: Object.assign({ 'content-type': 'application/json' }, extraHeaders || {})
+      headers: { 'content-type': 'application/json' }
     })
 
-    const accountEcho = cfg.accountAvailable ? { 'x-pplx-account-used': cfg.accountId } : {}
     const authenticated = headers['x-pplx-account'] === cfg.accountId
 
-    if (url.includes('list_recent')) {
-      return jsonResponse(authenticated ? cfg.listing : [], accountEcho)
-    }
-
-    if (url.includes('list_ask_threads')) {
-      return jsonResponse(authenticated ? cfg.listing : [], accountEcho)
+    if (url.includes('list_recent') || url.includes('list_ask_threads')) {
+      return jsonResponse(authenticated ? cfg.listing : [])
     }
 
     if (url.includes('/rest/thread/')) {
       if (authenticated) {
-        return jsonResponse(cfg.detail, accountEcho)
+        return jsonResponse(cfg.detail)
       }
 
       return new Response(JSON.stringify({ detail: { error_code: 'VIEW_THREAD_NOT_ALLOWED' } }), {
@@ -86,20 +81,16 @@ const installFetchStub = (cfg) => {
       })
     }
 
-    if (url === 'https://www.perplexity.ai/' || url === 'https://www.perplexity.ai') {
-      const marker = cfg.accountAvailable ? `"account_uuid":"${cfg.accountId}"` : ''
-      return new Response(`<html><body><script>${marker}</script></body></html>`, {
-        status: 200,
-        headers: Object.assign({ 'content-type': 'text/html' }, accountEcho)
-      })
-    }
-
-    if (url.includes('/api/auth/session')) {
-      return jsonResponse(cfg.accountAvailable ? { account_uuid: cfg.accountId } : {}, accountEcho)
-    }
-
     return jsonResponse([])
   }
+}
+
+// Seeds the account id through the spider's public intake — the same method
+// the runtime-message listener calls when the browser-context module relays
+// the id from the page's localStorage. The listener body is a one-line
+// delegation, so entering here still traverses validation and persistence.
+const seedAccountId = (accountId) => {
+  self['rexSpiderPerplexityPlugin'].storeAccountId(accountId)
 }
 
 const runCheckNeedsUpdate = () => {
@@ -138,15 +129,22 @@ const collectResults = () => {
 }
 
 test.describe('REX Spider Perplexity - Sessions API authentication', () => {
-  test('Attaches x-pplx-account to index and detail fetches and captures the conversation', async ({ serviceWorker }) => {
+  test('Recovers the stored account id on a cold worker and attaches x-pplx-account end to end', async ({ serviceWorker }) => {
     await new Promise((resolve) => setTimeout(resolve, startupDelay))
 
     await serviceWorker.evaluate(installFetchStub, {
-      accountAvailable: true,
       accountId: ACCOUNT_ID,
       listing: [listingItem],
       detail: detailResponse
     })
+
+    await serviceWorker.evaluate(seedAccountId, ACCOUNT_ID)
+
+    // Simulate an MV3 worker restart between the participant's perplexity
+    // visit and the collection round: in-memory state is gone, only the
+    // value persisted through rex-core survives. The run below must recover
+    // the id from storage, not from the cache seeded above.
+    await serviceWorker.evaluate(() => { self['rexSpiderPerplexityPlugin'].accountId = null })
 
     await serviceWorker.evaluate((slug) => { self['__threadSlug'] = slug }, THREAD_SLUG)
 
@@ -185,7 +183,6 @@ test.describe('REX Spider Perplexity - Sessions API authentication', () => {
     await new Promise((resolve) => setTimeout(resolve, startupDelay))
 
     await serviceWorker.evaluate(installFetchStub, {
-      accountAvailable: false,
       accountId: ACCOUNT_ID,
       listing: [listingItem],
       detail: detailResponse
@@ -209,15 +206,38 @@ test.describe('REX Spider Perplexity - Sessions API authentication', () => {
     expect(results.storedLastUpdate).toBeNull()
   })
 
+  test('storeAccountId rejects values that are not account UUIDs', async ({ serviceWorker }) => {
+    await new Promise((resolve) => setTimeout(resolve, startupDelay))
+
+    const stored = await serviceWorker.evaluate(() => {
+      const plugin = self['rexSpiderPerplexityPlugin']
+
+      plugin.storeAccountId('not-a-uuid')
+      plugin.storeAccountId({ messageType: 'nested-garbage' })
+      plugin.storeAccountId(null)
+
+      return new Promise((resolve) => {
+        self['rexCorePlugin'].handleMessage({
+          messageType: 'fetchValue',
+          key: 'rex-spider-perplexity-account-id'
+        }, null, (value) => resolve({ persisted: value, cached: plugin.accountId }))
+      })
+    })
+
+    expect(stored.persisted).toBeNull()
+    expect(stored.cached).toBeNull()
+  })
+
   test('checkLogin resolves true through the account header', async ({ serviceWorker }) => {
     await new Promise((resolve) => setTimeout(resolve, startupDelay))
 
     await serviceWorker.evaluate(installFetchStub, {
-      accountAvailable: true,
       accountId: ACCOUNT_ID,
       listing: [listingItem],
       detail: detailResponse
     })
+
+    await serviceWorker.evaluate(seedAccountId, ACCOUNT_ID)
 
     const loggedIn = await serviceWorker.evaluate(() => self['rexSpiderPerplexityPlugin'].checkLogin())
 

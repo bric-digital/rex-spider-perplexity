@@ -5,6 +5,10 @@ import rexSpiderPlugin, { REXSpider } from '@bric/rex-spider/service-worker'
 
 import { CrawlTarget, shouldCrawl } from './crawl-target.mjs'
 
+// Matches the account UUID browser.mts relays from the page's localStorage;
+// keep the two definitions in step.
+const ACCOUNT_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
 export class REXPerplexitySpider extends REXSpider {
   sleepDelayMs:number = 10000
   lookbackDays:number = 30
@@ -23,18 +27,26 @@ export class REXPerplexitySpider extends REXSpider {
 
   // Perplexity requires an x-pplx-account header naming the account UUID on
   // thread endpoints (observed 2026-08-22); cookie-only requests behave as an
-  // account-less session whose thread list is empty. In-memory only, so a
-  // restarted worker re-acquires it.
+  // account-less session whose thread list is empty. The UUID exists only in
+  // the page's localStorage (pplx-last-active-account), so browser.mts relays
+  // it here whenever a participant visits perplexity.ai. Cached in memory and
+  // persisted through rex-core so a restarted worker recovers it.
   accountId: string | null = null
 
-  private scanForAccountId(text: string): string | null {
-    const match = text.match(/"account_uuid"\s*:\s*"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/)
-
-    if (match !== null) {
-      return match[1]
+  // Accepts the relayed account UUID (see browser.mts). Public intake for the
+  // runtime-message listener at the bottom of this file.
+  storeAccountId(accountId: unknown): void {
+    if (typeof accountId !== 'string' || ACCOUNT_UUID_PATTERN.test(accountId) === false) {
+      return
     }
 
-    return null
+    this.accountId = accountId
+
+    rexCorePlugin.handleMessage({
+      messageType: 'storeValue',
+      key: 'rex-spider-perplexity-account-id',
+      value: accountId
+    }, this, () => {})
   }
 
   private fetchAccountId(): Promise<string | null> {
@@ -42,36 +54,20 @@ export class REXPerplexitySpider extends REXSpider {
       return Promise.resolve(this.accountId)
     }
 
-    const probeUrls = [
-      'https://www.perplexity.ai/api/auth/session',
-      'https://www.perplexity.ai/'
-    ]
-
-    const probe = (index: number): Promise<string | null> => {
-      if (index >= probeUrls.length) {
-        return Promise.resolve(null)
+    return new Promise((resolve) => {
+      const message = {
+        messageType: 'fetchValue',
+        key: 'rex-spider-perplexity-account-id'
       }
 
-      return fetch(probeUrls[index])
-        .then((response) => response.ok ? response.text() : '')
-        .then((body) => {
-          const found = this.scanForAccountId(body)
+      rexCorePlugin.handleMessage(message, this, (stored) => {
+        if (typeof stored === 'string' && ACCOUNT_UUID_PATTERN.test(stored)) {
+          this.accountId = stored
+        }
 
-          if (found !== null) {
-            return found
-          }
-
-          return probe(index + 1)
-        })
-        .catch(() => probe(index + 1))
-    }
-
-    return probe(0)
-      .then((accountId) => {
-        this.accountId = accountId
-
-        return accountId
+        resolve(this.accountId)
       })
+    })
   }
 
   private accountHeaders(): Record<string, string> {
@@ -823,5 +819,13 @@ chrome.declarativeNetRequest.updateSessionRules({ // updateSessionRules({
 const perplexitySpider = new REXPerplexitySpider()
 
 rexSpiderPlugin.registerSpider(perplexitySpider)
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => { // eslint-disable-line @typescript-eslint/no-unused-vars
+  if (message !== null && typeof message === 'object' && message.messageType === 'rexSpiderPerplexityAccountId') {
+    perplexitySpider.storeAccountId(message.accountId)
+  }
+
+  return false
+})
 
 export default perplexitySpider

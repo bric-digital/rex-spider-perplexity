@@ -6606,6 +6606,7 @@ function shouldCrawl(itemUpdateMs, storedUpdateMs) {
 }
 
 // src/service-worker.mts
+var ACCOUNT_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 var REXPerplexitySpider = class extends REXSpider {
   constructor() {
     super();
@@ -6625,8 +6626,10 @@ var REXPerplexitySpider = class extends REXSpider {
     this.completed = false;
     // Perplexity requires an x-pplx-account header naming the account UUID on
     // thread endpoints (observed 2026-08-22); cookie-only requests behave as an
-    // account-less session whose thread list is empty. In-memory only, so a
-    // restarted worker re-acquires it.
+    // account-less session whose thread list is empty. The UUID exists only in
+    // the page's localStorage (pplx-last-active-account), so browser.mts relays
+    // it here whenever a participant visits perplexity.ai. Cached in memory and
+    // persisted through rex-core so a restarted worker recovers it.
     this.accountId = null;
     service_worker_default.fetchConfiguration().then((config) => {
       const spiderConfig = config?.spider?.perplexity;
@@ -6648,36 +6651,35 @@ var REXPerplexitySpider = class extends REXSpider {
       }
     }).catch((err) => console.warn("[rex-spider-perplexity] Failed to read spider config:", err));
   }
-  scanForAccountId(text) {
-    const match = text.match(/"account_uuid"\s*:\s*"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/);
-    if (match !== null) {
-      return match[1];
+  // Accepts the relayed account UUID (see browser.mts). Public intake for the
+  // runtime-message listener at the bottom of this file.
+  storeAccountId(accountId) {
+    if (typeof accountId !== "string" || ACCOUNT_UUID_PATTERN.test(accountId) === false) {
+      return;
     }
-    return null;
+    this.accountId = accountId;
+    service_worker_default.handleMessage({
+      messageType: "storeValue",
+      key: "rex-spider-perplexity-account-id",
+      value: accountId
+    }, this, () => {
+    });
   }
   fetchAccountId() {
     if (this.accountId !== null) {
       return Promise.resolve(this.accountId);
     }
-    const probeUrls = [
-      "https://www.perplexity.ai/api/auth/session",
-      "https://www.perplexity.ai/"
-    ];
-    const probe = (index) => {
-      if (index >= probeUrls.length) {
-        return Promise.resolve(null);
-      }
-      return fetch(probeUrls[index]).then((response) => response.ok ? response.text() : "").then((body) => {
-        const found = this.scanForAccountId(body);
-        if (found !== null) {
-          return found;
+    return new Promise((resolve) => {
+      const message = {
+        messageType: "fetchValue",
+        key: "rex-spider-perplexity-account-id"
+      };
+      service_worker_default.handleMessage(message, this, (stored) => {
+        if (typeof stored === "string" && ACCOUNT_UUID_PATTERN.test(stored)) {
+          this.accountId = stored;
         }
-        return probe(index + 1);
-      }).catch(() => probe(index + 1));
-    };
-    return probe(0).then((accountId) => {
-      this.accountId = accountId;
-      return accountId;
+        resolve(this.accountId);
+      });
     });
   }
   accountHeaders() {
@@ -7221,6 +7223,12 @@ globalThis.chrome.declarativeNetRequest.updateSessionRules({
 });
 var perplexitySpider = new REXPerplexitySpider();
 service_worker_default2.registerSpider(perplexitySpider);
+globalThis.chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message !== null && typeof message === "object" && message.messageType === "rexSpiderPerplexityAccountId") {
+    perplexitySpider.storeAccountId(message.accountId);
+  }
+  return false;
+});
 var service_worker_default3 = perplexitySpider;
 
 // tests/src/service-worker.ts
