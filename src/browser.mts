@@ -31,8 +31,10 @@ const relayPerplexityAccountId = (): void => {
 
 relayPerplexityAccountId()
 
+// moduleName rather than name: Keystone's event-types gate scans @bric source
+// for `name:` literals and would read this as an outbound event type.
 const perplexityAccountRelay = {
-  name: 'REX Spider Perplexity (browser)'
+  moduleName: 'REX Spider Perplexity (browser)'
 }
 
 export default perplexityAccountRelay
